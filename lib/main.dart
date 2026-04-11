@@ -7,6 +7,8 @@ import 'core/bridge/method_channel_platform_bridge_gateway.dart';
 import 'core/domain/gateways/platform_bridge_gateway.dart';
 import 'core/application/translation_history_use_case.dart';
 import 'core/domain/translation_record.dart';
+import 'core/domain/gateways/llm_config_repository.dart';
+import 'core/domain/llm_config.dart';
 
 void main() {
   runApp(ModelTranslationApp());
@@ -17,11 +19,14 @@ class ModelTranslationApp extends StatelessWidget {
     super.key,
     PlatformBridgeGateway? platformBridgeGateway,
     TranslationHistoryUseCase? translationHistoryUseCase,
+      LlmConfigRepository? llmConfigRepository,
   })  : platformBridgeGateway = platformBridgeGateway ?? _DefaultPlatformBridgeGateway(),
-        translationHistoryUseCase = translationHistoryUseCase;
+      translationHistoryUseCase = translationHistoryUseCase,
+      llmConfigRepository = llmConfigRepository;
 
   final PlatformBridgeGateway platformBridgeGateway;
   final TranslationHistoryUseCase? translationHistoryUseCase;
+    final LlmConfigRepository? llmConfigRepository;
 
   @override
   Widget build(BuildContext context) {
@@ -35,6 +40,7 @@ class ModelTranslationApp extends StatelessWidget {
       home: TranslationShell(
         platformBridgeGateway: platformBridgeGateway,
         translationHistoryUseCase: translationHistoryUseCase,
+        llmConfigRepository: llmConfigRepository,
       ),
     );
   }
@@ -45,10 +51,12 @@ class TranslationShell extends StatefulWidget {
     super.key,
     required this.platformBridgeGateway,
     required this.translationHistoryUseCase,
+    required this.llmConfigRepository,
   });
 
   final PlatformBridgeGateway platformBridgeGateway;
   final TranslationHistoryUseCase? translationHistoryUseCase;
+  final LlmConfigRepository? llmConfigRepository;
 
   @override
   State<TranslationShell> createState() => _TranslationShellState();
@@ -157,7 +165,10 @@ class _TranslationShellState extends State<TranslationShell> {
                 onStopBubble: _stopBubble,
                 onReadClipboard: _readClipboard,
               ),
-              _SettingsSection(capabilities: capabilities),
+              _SettingsSection(
+                capabilities: capabilities,
+                llmConfigRepository: widget.llmConfigRepository,
+              ),
               _HistorySection(translationHistoryUseCase: widget.translationHistoryUseCase),
             ],
           ),
@@ -243,14 +254,131 @@ class _ControlSection extends StatelessWidget {
   }
 }
 
-class _SettingsSection extends StatelessWidget {
-  const _SettingsSection({required this.capabilities});
+class _SettingsSection extends StatefulWidget {
+  const _SettingsSection({
+    required this.capabilities,
+    required this.llmConfigRepository,
+  });
 
   final BridgeCapabilities? capabilities;
+  final LlmConfigRepository? llmConfigRepository;
+
+  @override
+  State<_SettingsSection> createState() => _SettingsSectionState();
+}
+
+class _SettingsSectionState extends State<_SettingsSection> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final TextEditingController _baseUrlController = TextEditingController();
+  final TextEditingController _apiKeyRefController = TextEditingController();
+  final TextEditingController _modelController = TextEditingController();
+  final TextEditingController _temperatureController = TextEditingController();
+  final TextEditingController _topPController = TextEditingController();
+  final TextEditingController _maxTokensController = TextEditingController();
+  final TextEditingController _timeoutMsController = TextEditingController();
+  final TextEditingController _systemPromptController = TextEditingController();
+  String statusMessage = 'Configuration not saved';
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadConfig();
+  }
+
+  @override
+  void dispose() {
+    _baseUrlController.dispose();
+    _apiKeyRefController.dispose();
+    _modelController.dispose();
+    _temperatureController.dispose();
+    _topPController.dispose();
+    _maxTokensController.dispose();
+    _timeoutMsController.dispose();
+    _systemPromptController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadConfig() async {
+    final configRepository = widget.llmConfigRepository;
+    if (configRepository == null) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _loading = false;
+      });
+      return;
+    }
+
+    final activeConfig = await configRepository.loadActive();
+    if (!mounted) {
+      return;
+    }
+
+    if (activeConfig != null) {
+      _applyConfig(activeConfig);
+      statusMessage = 'Loaded saved configuration';
+    }
+
+    setState(() {
+      _loading = false;
+    });
+  }
+
+  void _applyConfig(LlmConfig config) {
+    _baseUrlController.text = config.baseUrl;
+    _apiKeyRefController.text = config.apiKeyRef ?? '';
+    _modelController.text = config.model;
+    _temperatureController.text = config.temperature.toString();
+    _topPController.text = config.topP.toString();
+    _maxTokensController.text = config.maxTokens.toString();
+    _timeoutMsController.text = config.timeoutMs.toString();
+    _systemPromptController.text = config.systemPrompt;
+  }
+
+  Future<void> _saveConfig() async {
+    final configRepository = widget.llmConfigRepository;
+    if (configRepository == null) {
+      return;
+    }
+
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      return;
+    }
+
+    final config = LlmConfig(
+      id: 'active-config',
+      provider: 'openai-compatible',
+      baseUrl: _baseUrlController.text.trim(),
+      apiKeyRef: _apiKeyRefController.text.trim().isEmpty ? null : _apiKeyRefController.text.trim(),
+      model: _modelController.text.trim(),
+      temperature: double.parse(_temperatureController.text.trim()),
+      topP: double.parse(_topPController.text.trim()),
+      maxTokens: int.parse(_maxTokensController.text.trim()),
+      timeoutMs: int.parse(_timeoutMsController.text.trim()),
+      systemPrompt: _systemPromptController.text.trim(),
+      updatedAt: DateTime.now(),
+    );
+
+    await configRepository.saveActive(config);
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      statusMessage = 'Configuration saved';
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    final bridge = capabilities;
+    final bridge = widget.capabilities;
+
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
 
     return ListView(
       children: [
@@ -272,14 +400,90 @@ class _SettingsSection extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 12),
-        const _SummaryCard(
-          title: 'Configuration',
-          lines: [
-            'Base URL, API key, model, temperature, topP, maxTokens',
-            'Connection test and presets will be added in the next step',
-          ],
+        Card(
+          elevation: 0,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('LLM Configuration', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 12),
+                  _TextFieldRow(controller: _baseUrlController, label: 'Base URL', validator: _requiredText),
+                  _TextFieldRow(controller: _apiKeyRefController, label: 'API Key Ref', validator: _optionalText),
+                  _TextFieldRow(controller: _modelController, label: 'Model', validator: _requiredText),
+                  _TextFieldRow(controller: _temperatureController, label: 'Temperature', validator: _doubleText),
+                  _TextFieldRow(controller: _topPController, label: 'Top P', validator: _doubleText),
+                  _TextFieldRow(controller: _maxTokensController, label: 'Max Tokens', validator: _intText),
+                  _TextFieldRow(controller: _timeoutMsController, label: 'Timeout (ms)', validator: _intText),
+                  _TextFieldRow(controller: _systemPromptController, label: 'System Prompt', validator: _requiredText, maxLines: 3),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                    onPressed: _saveConfig,
+                    child: const Text('Save configuration'),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(statusMessage),
+                ],
+              ),
+            ),
+          ),
         ),
       ],
+    );
+  }
+
+  String? _requiredText(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Required';
+    }
+    return null;
+  }
+
+  String? _optionalText(String? value) => null;
+
+  String? _doubleText(String? value) {
+    final parsedValue = double.tryParse(value ?? '');
+    if (parsedValue == null) {
+      return 'Enter a number';
+    }
+    return null;
+  }
+
+  String? _intText(String? value) {
+    final parsedValue = int.tryParse(value ?? '');
+    if (parsedValue == null) {
+      return 'Enter an integer';
+    }
+    return null;
+  }
+}
+
+class _TextFieldRow extends StatelessWidget {
+  const _TextFieldRow({
+    required this.controller,
+    required this.label,
+    required this.validator,
+    this.maxLines = 1,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final String? Function(String?) validator;
+  final int maxLines;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextFormField(
+        controller: controller,
+        decoration: InputDecoration(labelText: label),
+        validator: validator,
+        maxLines: maxLines,
+      ),
     );
   }
 }

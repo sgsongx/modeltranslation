@@ -127,7 +127,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Bridge'), findsOneWidget);
-    expect(find.text('Configuration'), findsOneWidget);
+    expect(find.text('LLM Configuration'), findsOneWidget);
+    expect(find.text('Save configuration'), findsOneWidget);
 
     await tester.tap(find.text('History'));
     await tester.pumpAndSettle();
