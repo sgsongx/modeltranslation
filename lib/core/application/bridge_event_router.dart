@@ -3,6 +3,10 @@ import '../domain/actions/action_execution_result.dart';
 import '../domain/actions/action_invocation_context.dart';
 import 'action_registry.dart';
 
+abstract class BridgeEventProcessor {
+  Future<BridgeRouteResult> route(BridgeEvent event);
+}
+
 class BridgeRouteResult {
   const BridgeRouteResult._({
     required this.handled,
@@ -29,7 +33,7 @@ class BridgeRouteResult {
   final ActionExecutionResult? actionResult;
 }
 
-class BridgeEventRouter {
+class BridgeEventRouter implements BridgeEventProcessor {
   BridgeEventRouter({required ActionRegistry actionRegistry})
       : _actionRegistry = actionRegistry;
 

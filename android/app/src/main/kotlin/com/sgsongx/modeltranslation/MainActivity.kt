@@ -3,6 +3,7 @@ package com.sgsongx.modeltranslation
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -10,12 +11,44 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+	private var bridge: ModelTranslationBridge? = null
+	private var pendingActionId: String? = null
+	private var pendingPayload: Map<String, Any?> = emptyMap()
+
+	override fun onCreate(savedInstanceState: android.os.Bundle?) {
+		super.onCreate(savedInstanceState)
+		consumeIntent(intent)
+	}
+
+	override fun onNewIntent(intent: Intent) {
+		super.onNewIntent(intent)
+		setIntent(intent)
+		consumeIntent(intent)
+	}
+
 	override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
 		super.configureFlutterEngine(flutterEngine)
-		ModelTranslationBridge(
+		bridge = ModelTranslationBridge(
 			applicationContext = applicationContext,
 			messenger = flutterEngine.dartExecutor.binaryMessenger,
 		)
+		consumePendingAction()
+	}
+
+	private fun consumeIntent(intent: Intent?) {
+		val actionId = intent?.getStringExtra(FloatingBubbleService.EXTRA_ACTION_ID)
+		if (actionId != null) {
+			pendingActionId = actionId
+			pendingPayload = emptyMap()
+			consumePendingAction()
+		}
+	}
+
+	private fun consumePendingAction() {
+		val currentActionId = pendingActionId ?: return
+		bridge?.emitAction(currentActionId, pendingPayload)
+		pendingActionId = null
+		pendingPayload = emptyMap()
 	}
 }
 
@@ -35,6 +68,8 @@ private class ModelTranslationBridge(
 	override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
 		when (call.method) {
 			"getClipboardText" -> result.success(readClipboardText())
+			"startFloatingBubble" -> result.success(startFloatingBubble())
+			"stopFloatingBubble" -> result.success(stopFloatingBubble())
 			"showOverlay" -> result.success(true)
 			"hideOverlay" -> result.success(true)
 			"getBridgeCapabilities" -> {
@@ -44,6 +79,7 @@ private class ModelTranslationBridge(
 						"eventChannel" to EVENT_CHANNEL_NAME,
 						"supportsClipboard" to true,
 						"supportsOverlay" to true,
+						"supportsFloatingBubble" to true,
 					)
 				)
 			}
@@ -85,5 +121,16 @@ private class ModelTranslationBridge(
 	companion object {
 		private const val METHOD_CHANNEL_NAME = "modeltranslation/platform"
 		private const val EVENT_CHANNEL_NAME = "modeltranslation/action_events"
+	}
+
+	private fun startFloatingBubble(): Boolean {
+		FloatingBubbleService.ensureChannel(applicationContext)
+		FloatingBubbleService.start(applicationContext)
+		return true
+	}
+
+	private fun stopFloatingBubble(): Boolean {
+		FloatingBubbleService.stop(applicationContext)
+		return true
 	}
 }
