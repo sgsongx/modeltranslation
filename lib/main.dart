@@ -3,24 +3,54 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'core/bridge/bridge_event.dart';
 import 'core/bridge/method_channel_platform_bridge_gateway.dart';
+import 'core/application/action_registry.dart';
+import 'core/application/api_key_security_use_case.dart';
+import 'core/application/api_key_security_use_case_impl.dart';
+import 'core/application/default_action_registry.dart';
+import 'core/application/translate_clipboard_use_case.dart';
+import 'core/application/translate_clipboard_use_case_impl.dart';
 import 'core/domain/gateways/platform_bridge_gateway.dart';
 import 'core/application/translation_history_use_case.dart';
 import 'core/domain/translation_record.dart';
 import 'core/domain/gateways/llm_connection_tester.dart';
+import 'core/domain/gateways/llm_gateway.dart';
 import 'core/domain/gateways/llm_config_repository.dart';
+import 'core/domain/gateways/secret_vault.dart';
 import 'core/domain/llm_config.dart';
+import 'core/domain/actions/action_invocation_context.dart';
 import 'core/application/translation_history_use_case_impl.dart';
+import 'infrastructure/http_llm_gateway.dart';
 import 'infrastructure/in_memory_llm_config_repository.dart';
 import 'infrastructure/in_memory_record_repository.dart';
+import 'infrastructure/in_memory_secret_vault.dart';
+import 'infrastructure/llm_gateway_connection_tester.dart';
+import 'infrastructure/mock_llm_gateway.dart';
 import 'infrastructure/mock_llm_connection_tester.dart';
+import 'infrastructure/platform_bridge_gateways.dart';
+import 'infrastructure/vault_api_key_provider.dart';
 
 void main() {
-  runApp(ModelTranslationApp());
+  runApp(ModelTranslationApp(enableHttpLlmGateway: true));
 }
 
 class ModelTranslationApp extends StatelessWidget {
-  static final InMemoryLlmConfigRepository _defaultConfigRepository = InMemoryLlmConfigRepository();
+  static final InMemoryLlmConfigRepository _defaultConfigRepository = InMemoryLlmConfigRepository(
+    initialConfig: LlmConfig(
+      id: 'default-active-config',
+      provider: 'openai-compatible',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKeyRef: null,
+      model: 'gpt-4o-mini',
+      temperature: 0.2,
+      topP: 0.9,
+      maxTokens: 512,
+      timeoutMs: 12000,
+      systemPrompt: 'Translate the text accurately and keep formatting.',
+      updatedAt: DateTime(2026, 4, 11),
+    ),
+  );
   static final InMemoryRecordRepository _defaultRecordRepository = InMemoryRecordRepository();
 
   ModelTranslationApp({
@@ -28,16 +58,86 @@ class ModelTranslationApp extends StatelessWidget {
     PlatformBridgeGateway? platformBridgeGateway,
     TranslationHistoryUseCase? translationHistoryUseCase,
     LlmConfigRepository? llmConfigRepository,
+    SecretVault? secretVault,
+    LlmGateway? llmGateway,
+    TranslateClipboardUseCase? translateClipboardUseCase,
+    ActionRegistry? actionRegistry,
+    ApiKeySecurityUseCase? apiKeySecurityUseCase,
+    bool enableHttpLlmGateway = false,
     LlmConnectionTester? llmConnectionTester,
   })  : platformBridgeGateway = platformBridgeGateway ?? _DefaultPlatformBridgeGateway(),
+        llmConfigRepository = llmConfigRepository ?? _defaultConfigRepository,
+        secretVault = secretVault ?? InMemorySecretVault(),
+        llmGateway = llmGateway ??
+            (enableHttpLlmGateway
+                ? HttpLlmGateway(
+                    apiKeyProvider: VaultApiKeyProvider(secretVault ?? InMemorySecretVault()).resolve,
+                  )
+                : MockLlmGateway()),
+        translateClipboardUseCase = translateClipboardUseCase ??
+            TranslateClipboardUseCaseImpl(
+              clipboardGateway: PlatformClipboardGateway(platformBridgeGateway ?? _DefaultPlatformBridgeGateway()),
+              configRepository: llmConfigRepository ?? _defaultConfigRepository,
+              llmGateway: llmGateway ??
+                  (enableHttpLlmGateway
+                      ? HttpLlmGateway(
+                          apiKeyProvider: VaultApiKeyProvider(secretVault ?? InMemorySecretVault()).resolve,
+                        )
+                      : MockLlmGateway()),
+              overlayGateway: PlatformOverlayGateway(platformBridgeGateway ?? _DefaultPlatformBridgeGateway()),
+              recordRepository: _defaultRecordRepository,
+              nowProvider: DateTime.now,
+              idProvider: () => DateTime.now().microsecondsSinceEpoch.toString(),
+              targetLang: 'zh',
+              stylePreset: 'concise',
+            ),
+        actionRegistry = actionRegistry ??
+            buildDefaultActionRegistry(
+              translateClipboardUseCase: translateClipboardUseCase ??
+                  TranslateClipboardUseCaseImpl(
+                    clipboardGateway:
+                        PlatformClipboardGateway(platformBridgeGateway ?? _DefaultPlatformBridgeGateway()),
+                    configRepository: llmConfigRepository ?? _defaultConfigRepository,
+                    llmGateway: llmGateway ??
+                      (enableHttpLlmGateway
+                        ? HttpLlmGateway(
+                          apiKeyProvider: VaultApiKeyProvider(secretVault ?? InMemorySecretVault()).resolve,
+                          )
+                        : MockLlmGateway()),
+                    overlayGateway:
+                        PlatformOverlayGateway(platformBridgeGateway ?? _DefaultPlatformBridgeGateway()),
+                    recordRepository: _defaultRecordRepository,
+                    nowProvider: DateTime.now,
+                    idProvider: () => DateTime.now().microsecondsSinceEpoch.toString(),
+                    targetLang: 'zh',
+                    stylePreset: 'concise',
+                  ),
+            ),
+        apiKeySecurityUseCase = apiKeySecurityUseCase ??
+            ApiKeySecurityUseCaseImpl(
+              vault: secretVault ?? InMemorySecretVault(),
+              keyRefProvider: () => 'active-api-key',
+            ),
         translationHistoryUseCase = translationHistoryUseCase ??
             TranslationHistoryUseCaseImpl(repository: _defaultRecordRepository),
-        llmConfigRepository = llmConfigRepository ?? _defaultConfigRepository,
-        llmConnectionTester = llmConnectionTester ?? MockLlmConnectionTester();
+        llmConnectionTester = llmConnectionTester ??
+            (enableHttpLlmGateway
+                ? LlmGatewayConnectionTester(
+                    llmGateway: llmGateway ??
+                        HttpLlmGateway(
+                          apiKeyProvider: VaultApiKeyProvider(secretVault ?? InMemorySecretVault()).resolve,
+                        ),
+                  )
+                : MockLlmConnectionTester());
 
   final PlatformBridgeGateway platformBridgeGateway;
   final TranslationHistoryUseCase? translationHistoryUseCase;
   final LlmConfigRepository? llmConfigRepository;
+  final SecretVault? secretVault;
+  final LlmGateway? llmGateway;
+  final TranslateClipboardUseCase? translateClipboardUseCase;
+  final ActionRegistry? actionRegistry;
+  final ApiKeySecurityUseCase? apiKeySecurityUseCase;
   final LlmConnectionTester? llmConnectionTester;
 
   @override
@@ -53,6 +153,8 @@ class ModelTranslationApp extends StatelessWidget {
         platformBridgeGateway: platformBridgeGateway,
         translationHistoryUseCase: translationHistoryUseCase,
         llmConfigRepository: llmConfigRepository,
+        actionRegistry: actionRegistry,
+        apiKeySecurityUseCase: apiKeySecurityUseCase,
         llmConnectionTester: llmConnectionTester,
       ),
     );
@@ -65,12 +167,16 @@ class TranslationShell extends StatefulWidget {
     required this.platformBridgeGateway,
     required this.translationHistoryUseCase,
     required this.llmConfigRepository,
+    required this.actionRegistry,
+    required this.apiKeySecurityUseCase,
     required this.llmConnectionTester,
   });
 
   final PlatformBridgeGateway platformBridgeGateway;
   final TranslationHistoryUseCase? translationHistoryUseCase;
   final LlmConfigRepository? llmConfigRepository;
+  final ActionRegistry? actionRegistry;
+  final ApiKeySecurityUseCase? apiKeySecurityUseCase;
   final LlmConnectionTester? llmConnectionTester;
 
   @override
@@ -114,9 +220,95 @@ class _TranslationShellState extends State<TranslationShell> {
     });
 
     _eventSubscription = widget.platformBridgeGateway.watchActionEvents().listen((event) {
+      unawaited(_handleBridgeEvent(event));
+    });
+  }
+
+  Future<void> _handleBridgeEvent(BridgeEvent event) async {
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      statusMessage = 'Action event: ${event.actionId}';
+    });
+
+    if (event.kind != BridgeEventKind.action || event.actionId != 'translate_clipboard') {
+      return;
+    }
+
+    if (event.payload['translatedText'] == null && event.payload['errorMessage'] == null) {
+      final actionRegistry = widget.actionRegistry;
+      if (actionRegistry != null) {
+        final executionResult = await actionRegistry.execute(
+          event.actionId,
+          context: ActionInvocationContext(
+            actionId: event.actionId,
+            payload: event.payload,
+            createdAt: event.createdAt,
+          ),
+        );
+
+        if (!executionResult.isSuccess) {
+          if (!mounted) {
+            return;
+          }
+
+          setState(() {
+            statusMessage = 'Translation error overlay shown from bubble action';
+          });
+          return;
+        }
+
+        if (!mounted) {
+          return;
+        }
+
+        setState(() {
+          statusMessage = 'Translation overlay shown from bubble action';
+        });
+        return;
+      }
+    }
+
+    final errorMessage = (event.payload['errorMessage'] as String?)?.trim();
+    if (errorMessage != null && errorMessage.isNotEmpty) {
+      await widget.platformBridgeGateway.showOverlay(
+        title: 'Translation Error',
+        message: errorMessage,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
       setState(() {
-        statusMessage = 'Action event: ${event.actionId}';
+        statusMessage = 'Translation error overlay shown from bubble action';
       });
+      return;
+    }
+
+    final payloadText = event.payload['translatedText'] as String?;
+    var message = payloadText?.trim();
+    if (message == null || message.isEmpty) {
+      message = (await widget.platformBridgeGateway.getClipboardText())?.trim();
+    }
+
+    if (message == null || message.isEmpty) {
+      message = 'Clipboard is empty';
+    }
+
+    await widget.platformBridgeGateway.showOverlay(
+      title: 'Translation Result',
+      message: message,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      statusMessage = 'Translation overlay shown from bubble action';
     });
   }
 
@@ -176,6 +368,31 @@ class _TranslationShellState extends State<TranslationShell> {
     });
   }
 
+  Future<void> _showSampleOverlay() async {
+    await widget.platformBridgeGateway.showOverlay(
+      title: 'Translation Result',
+      message: clipboardText ?? 'Sample translated content. Tap Copy or Close in the overlay.',
+    );
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      statusMessage = 'Result overlay shown';
+    });
+  }
+
+  Future<void> _hideResultOverlay() async {
+    await widget.platformBridgeGateway.hideOverlay();
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      statusMessage = 'Result overlay hidden';
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -208,10 +425,13 @@ class _TranslationShellState extends State<TranslationShell> {
                 onStopBubble: _stopBubble,
                 onReadClipboard: _readClipboard,
                 onOpenOverlayPermissionSettings: _openOverlayPermissionSettings,
+                onShowSampleOverlay: _showSampleOverlay,
+                onHideResultOverlay: _hideResultOverlay,
               ),
               _SettingsSection(
                 capabilities: capabilities,
                 llmConfigRepository: widget.llmConfigRepository,
+                apiKeySecurityUseCase: widget.apiKeySecurityUseCase,
                 llmConnectionTester: widget.llmConnectionTester,
               ),
               _HistorySection(translationHistoryUseCase: widget.translationHistoryUseCase),
@@ -234,6 +454,8 @@ class _ControlSection extends StatelessWidget {
     required this.onStopBubble,
     required this.onReadClipboard,
     required this.onOpenOverlayPermissionSettings,
+    required this.onShowSampleOverlay,
+    required this.onHideResultOverlay,
   });
 
   final ColorScheme colorScheme;
@@ -245,6 +467,8 @@ class _ControlSection extends StatelessWidget {
   final Future<void> Function() onStopBubble;
   final Future<void> Function() onReadClipboard;
   final Future<void> Function() onOpenOverlayPermissionSettings;
+  final Future<void> Function() onShowSampleOverlay;
+  final Future<void> Function() onHideResultOverlay;
 
   @override
   Widget build(BuildContext context) {
@@ -287,6 +511,14 @@ class _ControlSection extends StatelessWidget {
                         onPressed: onReadClipboard,
                         child: const Text('Read clipboard'),
                       ),
+                      OutlinedButton(
+                        onPressed: onShowSampleOverlay,
+                        child: const Text('Show result overlay'),
+                      ),
+                      TextButton(
+                        onPressed: onHideResultOverlay,
+                        child: const Text('Hide result overlay'),
+                      ),
                     ],
                   ),
                   if (!hasOverlayPermission) ...[
@@ -318,11 +550,13 @@ class _SettingsSection extends StatefulWidget {
   const _SettingsSection({
     required this.capabilities,
     required this.llmConfigRepository,
+    required this.apiKeySecurityUseCase,
     required this.llmConnectionTester,
   });
 
   final BridgeCapabilities? capabilities;
   final LlmConfigRepository? llmConfigRepository;
+  final ApiKeySecurityUseCase? apiKeySecurityUseCase;
   final LlmConnectionTester? llmConnectionTester;
 
   @override
@@ -332,13 +566,14 @@ class _SettingsSection extends StatefulWidget {
 class _SettingsSectionState extends State<_SettingsSection> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TextEditingController _baseUrlController = TextEditingController();
-  final TextEditingController _apiKeyRefController = TextEditingController();
+  final TextEditingController _apiKeyController = TextEditingController();
   final TextEditingController _modelController = TextEditingController();
   final TextEditingController _temperatureController = TextEditingController();
   final TextEditingController _topPController = TextEditingController();
   final TextEditingController _maxTokensController = TextEditingController();
   final TextEditingController _timeoutMsController = TextEditingController();
   final TextEditingController _systemPromptController = TextEditingController();
+  String? _apiKeyRef;
   String statusMessage = 'Configuration not saved';
   bool _loading = true;
 
@@ -351,7 +586,7 @@ class _SettingsSectionState extends State<_SettingsSection> {
   @override
   void dispose() {
     _baseUrlController.dispose();
-    _apiKeyRefController.dispose();
+    _apiKeyController.dispose();
     _modelController.dispose();
     _temperatureController.dispose();
     _topPController.dispose();
@@ -391,7 +626,7 @@ class _SettingsSectionState extends State<_SettingsSection> {
 
   void _applyConfig(LlmConfig config) {
     _baseUrlController.text = config.baseUrl;
-    _apiKeyRefController.text = config.apiKeyRef ?? '';
+    _apiKeyRef = config.apiKeyRef;
     _modelController.text = config.model;
     _temperatureController.text = config.temperature.toString();
     _topPController.text = config.topP.toString();
@@ -410,11 +645,45 @@ class _SettingsSectionState extends State<_SettingsSection> {
       return;
     }
 
+    var resolvedApiKeyRef = _apiKeyRef;
+    final apiKeyValue = _apiKeyController.text.trim();
+
+    if (apiKeyValue.isNotEmpty) {
+      final apiKeySecurityUseCase = widget.apiKeySecurityUseCase;
+      if (apiKeySecurityUseCase == null) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          statusMessage = 'API key store is unavailable';
+        });
+        return;
+      }
+
+      final storeResult = await apiKeySecurityUseCase.store(
+        apiKeyValue,
+        keyRef: resolvedApiKeyRef,
+      );
+
+      if (!storeResult.isSuccess || storeResult.value == null) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          statusMessage = storeResult.failure?.message ?? 'Failed to store API key';
+        });
+        return;
+      }
+
+      resolvedApiKeyRef = storeResult.value;
+      _apiKeyRef = resolvedApiKeyRef;
+    }
+
     final config = LlmConfig(
       id: 'active-config',
       provider: 'openai-compatible',
       baseUrl: _baseUrlController.text.trim(),
-      apiKeyRef: _apiKeyRefController.text.trim().isEmpty ? null : _apiKeyRefController.text.trim(),
+      apiKeyRef: resolvedApiKeyRef,
       model: _modelController.text.trim(),
       temperature: double.parse(_temperatureController.text.trim()),
       topP: double.parse(_topPController.text.trim()),
@@ -448,7 +717,7 @@ class _SettingsSectionState extends State<_SettingsSection> {
       id: 'active-config',
       provider: 'openai-compatible',
       baseUrl: _baseUrlController.text.trim(),
-      apiKeyRef: _apiKeyRefController.text.trim().isEmpty ? null : _apiKeyRefController.text.trim(),
+      apiKeyRef: _apiKeyRef,
       model: _modelController.text.trim(),
       temperature: double.parse(_temperatureController.text.trim()),
       topP: double.parse(_topPController.text.trim()),
@@ -512,7 +781,7 @@ class _SettingsSectionState extends State<_SettingsSection> {
                   Text('LLM Configuration', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 12),
                   _TextFieldRow(controller: _baseUrlController, label: 'Base URL', validator: _requiredText),
-                  _TextFieldRow(controller: _apiKeyRefController, label: 'API Key Ref', validator: _optionalText),
+                  _TextFieldRow(controller: _apiKeyController, label: 'API Key', validator: _optionalText, obscureText: true),
                   _TextFieldRow(controller: _modelController, label: 'Model', validator: _requiredText),
                   _TextFieldRow(controller: _temperatureController, label: 'Temperature', validator: _doubleText),
                   _TextFieldRow(controller: _topPController, label: 'Top P', validator: _doubleText),
@@ -572,12 +841,14 @@ class _TextFieldRow extends StatelessWidget {
     required this.label,
     required this.validator,
     this.maxLines = 1,
+    this.obscureText = false,
   });
 
   final TextEditingController controller;
   final String label;
   final String? Function(String?) validator;
   final int maxLines;
+  final bool obscureText;
 
   @override
   Widget build(BuildContext context) {
@@ -588,6 +859,7 @@ class _TextFieldRow extends StatelessWidget {
         decoration: InputDecoration(labelText: label),
         validator: validator,
         maxLines: maxLines,
+        obscureText: obscureText,
       ),
     );
   }

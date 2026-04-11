@@ -1,21 +1,45 @@
 import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:modeltranslation/core/application/default_action_registry.dart';
+import 'package:modeltranslation/core/application/translate_clipboard_use_case_impl.dart';
 import 'package:modeltranslation/core/bridge/bridge_event.dart';
 import 'package:modeltranslation/core/application/translation_history_use_case.dart';
 import 'package:modeltranslation/core/application/use_case_result.dart';
+import 'package:modeltranslation/core/domain/llm_config.dart';
 import 'package:modeltranslation/core/domain/gateways/platform_bridge_gateway.dart';
 import 'package:modeltranslation/core/domain/translation_record.dart';
+import 'package:modeltranslation/infrastructure/http_llm_gateway.dart';
+import 'package:modeltranslation/infrastructure/in_memory_llm_config_repository.dart';
+import 'package:modeltranslation/infrastructure/in_memory_record_repository.dart';
+import 'package:modeltranslation/infrastructure/in_memory_secret_vault.dart';
+import 'package:modeltranslation/infrastructure/platform_bridge_gateways.dart';
+import 'package:modeltranslation/infrastructure/vault_api_key_provider.dart';
 import 'package:modeltranslation/main.dart';
 
 class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   final StreamController<BridgeEvent> _eventController = StreamController<BridgeEvent>.broadcast();
   int startCalls = 0;
   int stopCalls = 0;
+  int showOverlayCalls = 0;
+  int hideOverlayCalls = 0;
   int openOverlaySettingsCalls = 0;
+  String? lastOverlayTitle;
+  String? lastOverlayMessage;
   String? clipboardText;
   bool hasOverlayPermission = true;
+
+  void emitActionEvent(String actionId, {Map<String, Object?> payload = const <String, Object?>{}}) {
+    _eventController.add(
+      BridgeEvent.action(
+        actionId: actionId,
+        payload: payload,
+        createdAt: DateTime.now(),
+      ),
+    );
+  }
 
   @override
   Future<String?> getClipboardText() async => clipboardText;
@@ -35,15 +59,21 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   }
 
   @override
-  Future<void> hideOverlay() async {}
-
-  @override
   Future<void> openOverlayPermissionSettings() async {
     openOverlaySettingsCalls++;
   }
 
   @override
-  Future<void> showOverlay({required String title, required String message}) async {}
+  Future<void> hideOverlay() async {
+    hideOverlayCalls++;
+  }
+
+  @override
+  Future<void> showOverlay({required String title, required String message}) async {
+    showOverlayCalls++;
+    lastOverlayTitle = title;
+    lastOverlayMessage = message;
+  }
 
   @override
   Future<void> startFloatingBubble() async {
@@ -100,6 +130,33 @@ class FakeHistoryUseCase implements TranslationHistoryUseCase {
   }
 }
 
+class FakeDioHttpClient implements DioHttpClient {
+  FakeDioHttpClient(this._responses);
+
+  final List<Object> _responses;
+  int callCount = 0;
+
+  @override
+  Future<Response<Map<String, dynamic>>> postJson({
+    required String url,
+    required Map<String, String> headers,
+    required Map<String, Object?> body,
+    required int timeoutMs,
+  }) async {
+    callCount++;
+    final current = _responses[callCount - 1];
+    if (current is Exception) {
+      throw current;
+    }
+
+    return Response<Map<String, dynamic>>(
+      requestOptions: RequestOptions(path: url),
+      statusCode: 200,
+      data: current as Map<String, dynamic>,
+    );
+  }
+}
+
 void main() {
   testWidgets('ModelTranslation app exposes bubble controls', (WidgetTester tester) async {
     final gateway = FakePlatformBridgeGateway();
@@ -147,16 +204,222 @@ void main() {
     expect(find.text('Overlay permission required to start floating bubble'), findsOneWidget);
     expect(find.text('Grant permission'), findsOneWidget);
 
+    await tester.ensureVisible(find.text('Grant permission'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Grant permission'));
     await tester.pump();
 
     expect(gateway.openOverlaySettingsCalls, 1);
   });
 
-  testWidgets('ModelTranslation app switches to settings and history tabs', (WidgetTester tester) async {
+  testWidgets('ModelTranslation app triggers sample overlay actions', (WidgetTester tester) async {
     final gateway = FakePlatformBridgeGateway();
 
     await tester.pumpWidget(ModelTranslationApp(platformBridgeGateway: gateway));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Show result overlay'));
+    await tester.pump();
+    await tester.tap(find.text('Hide result overlay'));
+    await tester.pump();
+
+    expect(gateway.showOverlayCalls, 1);
+    expect(gateway.hideOverlayCalls, 1);
+  });
+
+  testWidgets('ModelTranslation app handles translate action event and shows result overlay',
+      (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway()
+      ..clipboardText = 'Hello from clipboard';
+
+    await tester.pumpWidget(ModelTranslationApp(platformBridgeGateway: gateway));
+    await tester.pumpAndSettle();
+
+    gateway.emitActionEvent('translate_clipboard');
+    await tester.pumpAndSettle();
+
+    expect(gateway.showOverlayCalls, 1);
+    expect(gateway.lastOverlayTitle, 'Translation Result');
+    expect(gateway.lastOverlayMessage, 'Hello from clipboard');
+  });
+
+  testWidgets('ModelTranslation app prefers translatedText from action payload', (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway()
+      ..clipboardText = 'clipboard fallback';
+
+    await tester.pumpWidget(ModelTranslationApp(platformBridgeGateway: gateway));
+    await tester.pumpAndSettle();
+
+    gateway.emitActionEvent('translate_clipboard', payload: <String, Object?>{'translatedText': 'payload text'});
+    await tester.pumpAndSettle();
+
+    expect(gateway.showOverlayCalls, 1);
+    expect(gateway.lastOverlayMessage, 'payload text');
+  });
+
+  testWidgets('ModelTranslation app ignores unknown action events', (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway();
+
+    await tester.pumpWidget(ModelTranslationApp(platformBridgeGateway: gateway));
+    await tester.pumpAndSettle();
+
+    gateway.emitActionEvent('unknown_action');
+    await tester.pumpAndSettle();
+
+    expect(gateway.showOverlayCalls, 0);
+  });
+
+  testWidgets('ModelTranslation app shows error summary on failed translate action event',
+      (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway();
+
+    await tester.pumpWidget(ModelTranslationApp(platformBridgeGateway: gateway));
+    await tester.pumpAndSettle();
+
+    gateway.emitActionEvent('translate_clipboard', payload: <String, Object?>{'errorMessage': 'Network timeout'});
+    await tester.pumpAndSettle();
+
+    expect(gateway.showOverlayCalls, 1);
+    expect(gateway.lastOverlayTitle, 'Translation Error');
+    expect(gateway.lastOverlayMessage, 'Network timeout');
+  });
+
+  testWidgets('ModelTranslation app shows API key missing error when action triggers without key',
+      (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway()
+      ..clipboardText = 'Hello from clipboard';
+    final configRepository = InMemoryLlmConfigRepository(
+      initialConfig: LlmConfig(
+        id: 'active-config',
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.example.com/v1',
+        apiKeyRef: null,
+        model: 'gpt-4o-mini',
+        temperature: 0.2,
+        topP: 0.9,
+        maxTokens: 128,
+        timeoutMs: 5000,
+        systemPrompt: 'Translate accurately.',
+        updatedAt: DateTime(2026, 4, 11),
+      ),
+    );
+    final client = FakeDioHttpClient(const <Object>[]);
+    final llmGateway = HttpLlmGateway(
+      client: client,
+      apiKeyProvider: (_) async => null,
+    );
+    final translateClipboardUseCase = TranslateClipboardUseCaseImpl(
+      clipboardGateway: PlatformClipboardGateway(gateway),
+      configRepository: configRepository,
+      llmGateway: llmGateway,
+      overlayGateway: PlatformOverlayGateway(gateway),
+      recordRepository: InMemoryRecordRepository(),
+      nowProvider: DateTime.now,
+      idProvider: () => 'record-1',
+      targetLang: 'zh',
+      stylePreset: 'concise',
+    );
+    final actionRegistry = buildDefaultActionRegistry(
+      translateClipboardUseCase: translateClipboardUseCase,
+    );
+
+    await tester.pumpWidget(
+      ModelTranslationApp(
+        platformBridgeGateway: gateway,
+        llmConfigRepository: configRepository,
+        actionRegistry: actionRegistry,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    gateway.emitActionEvent('translate_clipboard');
+    await tester.pumpAndSettle();
+
+    expect(client.callCount, 0);
+    expect(gateway.showOverlayCalls, 1);
+    expect(gateway.lastOverlayTitle, 'Translation Error');
+    expect(gateway.lastOverlayMessage, contains('API key is missing'));
+  });
+
+  testWidgets('ModelTranslation app translates successfully when API key is stored',
+      (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway()
+      ..clipboardText = 'Hello from clipboard';
+    final configRepository = InMemoryLlmConfigRepository(
+      initialConfig: LlmConfig(
+        id: 'active-config',
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.example.com/v1',
+        apiKeyRef: 'vault-ref-1',
+        model: 'gpt-4o-mini',
+        temperature: 0.2,
+        topP: 0.9,
+        maxTokens: 128,
+        timeoutMs: 5000,
+        systemPrompt: 'Translate accurately.',
+        updatedAt: DateTime(2026, 4, 11),
+      ),
+    );
+    final secretVault = InMemorySecretVault();
+    await secretVault.write('vault-ref-1', 'secret-api-key');
+    final client = FakeDioHttpClient([
+      <String, dynamic>{
+        'choices': [
+          {
+            'message': {'content': '你好，世界'}
+          }
+        ]
+      }
+    ]);
+    final llmGateway = HttpLlmGateway(
+      client: client,
+      apiKeyProvider: VaultApiKeyProvider(secretVault).resolve,
+    );
+    final recordRepository = InMemoryRecordRepository();
+    final translateClipboardUseCase = TranslateClipboardUseCaseImpl(
+      clipboardGateway: PlatformClipboardGateway(gateway),
+      configRepository: configRepository,
+      llmGateway: llmGateway,
+      overlayGateway: PlatformOverlayGateway(gateway),
+      recordRepository: recordRepository,
+      nowProvider: DateTime.now,
+      idProvider: () => 'record-1',
+      targetLang: 'zh',
+      stylePreset: 'concise',
+    );
+    final actionRegistry = buildDefaultActionRegistry(
+      translateClipboardUseCase: translateClipboardUseCase,
+    );
+
+    await tester.pumpWidget(
+      ModelTranslationApp(
+        platformBridgeGateway: gateway,
+        llmConfigRepository: configRepository,
+        secretVault: secretVault,
+        actionRegistry: actionRegistry,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    gateway.emitActionEvent('translate_clipboard');
+    await tester.pumpAndSettle();
+
+    expect(client.callCount, 1);
+    expect(gateway.showOverlayCalls, 1);
+    expect(gateway.lastOverlayTitle, 'Translation Result');
+    expect(gateway.lastOverlayMessage, '你好，世界');
+    expect(recordRepository.listRecent(), completion(hasLength(1)));
+  });
+
+  testWidgets('ModelTranslation app switches to settings and history tabs', (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway();
+
+    await tester.pumpWidget(
+      ModelTranslationApp(
+        platformBridgeGateway: gateway,
+        translationHistoryUseCase: FakeHistoryUseCase(const <TranslationRecord>[]),
+      ),
+    );
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Settings'));

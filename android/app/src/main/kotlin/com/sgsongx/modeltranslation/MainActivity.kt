@@ -71,12 +71,12 @@ private class ModelTranslationBridge(
 	override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
 		when (call.method) {
 			"getClipboardText" -> result.success(readClipboardText())
-				"hasOverlayPermission" -> result.success(hasOverlayPermission())
-				"openOverlayPermissionSettings" -> result.success(openOverlayPermissionSettings())
+			"hasOverlayPermission" -> result.success(hasOverlayPermission())
+			"openOverlayPermissionSettings" -> result.success(openOverlayPermissionSettings())
 			"startFloatingBubble" -> result.success(startFloatingBubble())
 			"stopFloatingBubble" -> result.success(stopFloatingBubble())
-			"showOverlay" -> result.success(true)
-			"hideOverlay" -> result.success(true)
+			"showOverlay" -> result.success(showOverlay(call))
+			"hideOverlay" -> result.success(hideOverlay())
 			"getBridgeCapabilities" -> {
 				result.success(
 					mapOf(
@@ -100,28 +100,43 @@ private class ModelTranslationBridge(
 		eventSink = null
 	}
 
-		private fun hasOverlayPermission(): Boolean {
-			return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-				Settings.canDrawOverlays(applicationContext)
-			} else {
-				true
-			}
+	private fun hasOverlayPermission(): Boolean {
+		return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+			Settings.canDrawOverlays(applicationContext)
+		} else {
+			true
 		}
+	}
 
-		private fun openOverlayPermissionSettings(): Boolean {
-			if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
-				return true
-			}
-
-			val intent = Intent(
-				Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-				Uri.parse("package:${applicationContext.packageName}"),
-			).apply {
-				addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-			}
-			applicationContext.startActivity(intent)
+	private fun openOverlayPermissionSettings(): Boolean {
+		if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
 			return true
 		}
+
+		val intent = Intent(
+			Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+			Uri.parse("package:${applicationContext.packageName}"),
+		).apply {
+			addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+		}
+		applicationContext.startActivity(intent)
+		return true
+	}
+
+	private fun showOverlay(call: MethodCall): Boolean {
+		val title = call.argument<String>("title") ?: "Translation Result"
+		val message = call.argument<String>("message") ?: ""
+		val showRetry = title == "Translation Error"
+		FloatingBubbleService.ensureChannel(applicationContext)
+		FloatingBubbleService.start(applicationContext)
+		FloatingBubbleService.showResult(applicationContext, title, message, showRetry)
+		return true
+	}
+
+	private fun hideOverlay(): Boolean {
+		FloatingBubbleService.hideResult(applicationContext)
+		return true
+	}
 
 	private fun readClipboardText(): String? {
 		val clipboardManager = applicationContext.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
