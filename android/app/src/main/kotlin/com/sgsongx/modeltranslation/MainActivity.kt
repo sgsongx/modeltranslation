@@ -4,6 +4,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -68,6 +71,8 @@ private class ModelTranslationBridge(
 	override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
 		when (call.method) {
 			"getClipboardText" -> result.success(readClipboardText())
+				"hasOverlayPermission" -> result.success(hasOverlayPermission())
+				"openOverlayPermissionSettings" -> result.success(openOverlayPermissionSettings())
 			"startFloatingBubble" -> result.success(startFloatingBubble())
 			"stopFloatingBubble" -> result.success(stopFloatingBubble())
 			"showOverlay" -> result.success(true)
@@ -94,6 +99,29 @@ private class ModelTranslationBridge(
 	override fun onCancel(arguments: Any?) {
 		eventSink = null
 	}
+
+		private fun hasOverlayPermission(): Boolean {
+			return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+				Settings.canDrawOverlays(applicationContext)
+			} else {
+				true
+			}
+		}
+
+		private fun openOverlayPermissionSettings(): Boolean {
+			if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+				return true
+			}
+
+			val intent = Intent(
+				Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+				Uri.parse("package:${applicationContext.packageName}"),
+			).apply {
+				addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+			}
+			applicationContext.startActivity(intent)
+			return true
+		}
 
 	private fun readClipboardText(): String? {
 		val clipboardManager = applicationContext.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager

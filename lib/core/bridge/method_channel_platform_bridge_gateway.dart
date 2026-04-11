@@ -37,8 +37,18 @@ class MethodChannelPlatformBridgeGateway implements PlatformBridgeGateway {
   }
 
   @override
+  Future<bool> hasOverlayPermissionGranted() async {
+    return await _methodChannel.invokeMethod<bool>('hasOverlayPermission') ?? false;
+  }
+
+  @override
   Future<void> hideOverlay() async {
     await _methodChannel.invokeMethod<void>('hideOverlay');
+  }
+
+  @override
+  Future<void> openOverlayPermissionSettings() async {
+    await _methodChannel.invokeMethod<void>('openOverlayPermissionSettings');
   }
 
   @override

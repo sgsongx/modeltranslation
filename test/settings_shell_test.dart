@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:modeltranslation/core/bridge/bridge_event.dart';
+import 'package:modeltranslation/core/domain/config/connection_test_result.dart';
+import 'package:modeltranslation/core/domain/gateways/llm_connection_tester.dart';
 import 'package:modeltranslation/core/domain/gateways/platform_bridge_gateway.dart';
 import 'package:modeltranslation/core/domain/gateways/llm_config_repository.dart';
 import 'package:modeltranslation/core/domain/llm_config.dart';
@@ -13,6 +15,9 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
 
   @override
   Future<String?> getClipboardText() async => null;
+
+  @override
+  Future<bool> hasOverlayPermissionGranted() async => true;
 
   @override
   Future<BridgeCapabilities> getCapabilities() async {
@@ -27,6 +32,9 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
 
   @override
   Future<void> hideOverlay() async {}
+
+  @override
+  Future<void> openOverlayPermissionSettings() async {}
 
   @override
   Future<void> showOverlay({required String title, required String message}) async {}
@@ -53,6 +61,19 @@ class FakeLlmConfigRepository implements LlmConfigRepository {
   }
 }
 
+class FakeLlmConnectionTester implements LlmConnectionTester {
+  @override
+  Future<ConnectionTestResult> test(LlmConfig config) async {
+    return ConnectionTestResult.success(
+      provider: config.provider,
+      model: config.model,
+      endpoint: config.baseUrl,
+      latencyMs: 125,
+      message: 'Connection verified.',
+    );
+  }
+}
+
 void main() {
   testWidgets('Settings form saves the config through the repository', (WidgetTester tester) async {
     final platformGateway = FakePlatformBridgeGateway();
@@ -63,6 +84,7 @@ void main() {
         platformBridgeGateway: platformGateway,
         translationHistoryUseCase: null,
         llmConfigRepository: configRepository,
+        llmConnectionTester: FakeLlmConnectionTester(),
       ),
     );
     await tester.pumpAndSettle();
@@ -98,5 +120,40 @@ void main() {
     expect(configRepository.activeConfig!.apiKeyRef, 'secure-ref-1');
     expect(configRepository.activeConfig!.model, 'gpt-4o-mini');
     expect(find.text('Configuration saved'), findsOneWidget);
+  });
+
+  testWidgets('Settings form runs connection test and shows result', (WidgetTester tester) async {
+    final platformGateway = FakePlatformBridgeGateway();
+    final configRepository = FakeLlmConfigRepository();
+
+    await tester.pumpWidget(
+      ModelTranslationApp(
+        platformBridgeGateway: platformGateway,
+        translationHistoryUseCase: null,
+        llmConfigRepository: configRepository,
+        llmConnectionTester: FakeLlmConnectionTester(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.widgetWithText(TextFormField, 'Base URL'), 'https://api.example.com/v1');
+    await tester.enterText(find.widgetWithText(TextFormField, 'API Key Ref'), 'secure-ref-1');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Model'), 'gpt-4o-mini');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Temperature'), '0.2');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Top P'), '0.9');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Max Tokens'), '1024');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Timeout (ms)'), '15000');
+    await tester.enterText(find.widgetWithText(TextFormField, 'System Prompt'), 'Translate with a concise style.');
+
+    await tester.drag(find.byType(ListView).last, const Offset(0, -700));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Test connection'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Connection verified.'), findsOneWidget);
+    expect(find.textContaining('125 ms'), findsOneWidget);
   });
 }

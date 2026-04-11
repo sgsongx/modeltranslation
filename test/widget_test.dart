@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:modeltranslation/core/bridge/bridge_event.dart';
 import 'package:modeltranslation/core/application/translation_history_use_case.dart';
@@ -12,10 +13,15 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   final StreamController<BridgeEvent> _eventController = StreamController<BridgeEvent>.broadcast();
   int startCalls = 0;
   int stopCalls = 0;
+  int openOverlaySettingsCalls = 0;
   String? clipboardText;
+  bool hasOverlayPermission = true;
 
   @override
   Future<String?> getClipboardText() async => clipboardText;
+
+  @override
+  Future<bool> hasOverlayPermissionGranted() async => hasOverlayPermission;
 
   @override
   Future<BridgeCapabilities> getCapabilities() async {
@@ -30,6 +36,11 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
 
   @override
   Future<void> hideOverlay() async {}
+
+  @override
+  Future<void> openOverlayPermissionSettings() async {
+    openOverlaySettingsCalls++;
+  }
 
   @override
   Future<void> showOverlay({required String title, required String message}) async {}
@@ -49,34 +60,43 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
 }
 
 class FakeHistoryUseCase implements TranslationHistoryUseCase {
-  FakeHistoryUseCase(this.records);
+  FakeHistoryUseCase(List<TranslationRecord> records)
+      : _records = List<TranslationRecord>.from(records);
 
-  final List<TranslationRecord> records;
+  final List<TranslationRecord> _records;
 
   @override
   Future<UseCaseResult<int>> clearAll() async {
-    return UseCaseResult.success(records.length);
+    final deleted = _records.length;
+    _records.clear();
+    return UseCaseResult.success(deleted);
   }
 
   @override
   Future<UseCaseResult<int>> deleteById(String id) async {
+    _records.removeWhere((record) => record.id == id);
     return UseCaseResult.success(1);
   }
 
   @override
   Future<UseCaseResult<TranslationRecord?>> getById(String id) async {
-    final record = records.firstWhere((entry) => entry.id == id, orElse: () => throw StateError('missing'));
+    final record = _records.firstWhere((entry) => entry.id == id, orElse: () => throw StateError('missing'));
     return UseCaseResult.success(record);
   }
 
   @override
   Future<UseCaseResult<List<TranslationRecord>>> loadRecent({int limit = 50}) async {
-    return UseCaseResult.success(records.take(limit).toList());
+    return UseCaseResult.success(_records.take(limit).toList());
   }
 
   @override
   Future<UseCaseResult<List<TranslationRecord>>> search(String query) async {
-    return UseCaseResult.success(records);
+    final normalized = query.toLowerCase();
+    final results = _records.where((record) {
+      return record.sourceText.toLowerCase().contains(normalized) ||
+          record.translatedText.toLowerCase().contains(normalized);
+    }).toList();
+    return UseCaseResult.success(results);
   }
 }
 
@@ -115,6 +135,22 @@ void main() {
     await tester.pump();
 
     expect(find.textContaining('Hello world'), findsOneWidget);
+  });
+
+  testWidgets('ModelTranslation app guides overlay permission and opens settings', (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway()
+      ..hasOverlayPermission = false;
+
+    await tester.pumpWidget(ModelTranslationApp(platformBridgeGateway: gateway));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Overlay permission required to start floating bubble'), findsOneWidget);
+    expect(find.text('Grant permission'), findsOneWidget);
+
+    await tester.tap(find.text('Grant permission'));
+    await tester.pump();
+
+    expect(gateway.openOverlaySettingsCalls, 1);
   });
 
   testWidgets('ModelTranslation app switches to settings and history tabs', (WidgetTester tester) async {
@@ -170,5 +206,137 @@ void main() {
     expect(find.text('Loaded 1 records'), findsOneWidget);
     expect(find.text('Hello world'), findsOneWidget);
     expect(find.text('你好，世界'), findsOneWidget);
+  });
+
+  testWidgets('ModelTranslation app searches history records', (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway();
+    final historyUseCase = FakeHistoryUseCase(
+      [
+        TranslationRecord(
+          id: 'record-1',
+          sourceText: 'Hello world',
+          translatedText: '你好，世界',
+          provider: 'openai-compatible',
+          model: 'gpt-4o-mini',
+          paramsJson: '{"temperature":0.2}',
+          status: TranslationStatus.success,
+          errorMessage: null,
+          createdAt: DateTime(2026, 4, 11, 10),
+        ),
+        TranslationRecord(
+          id: 'record-2',
+          sourceText: 'Good night',
+          translatedText: '晚安',
+          provider: 'openai-compatible',
+          model: 'gpt-4o-mini',
+          paramsJson: '{"temperature":0.2}',
+          status: TranslationStatus.success,
+          errorMessage: null,
+          createdAt: DateTime(2026, 4, 11, 11),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ModelTranslationApp(
+        platformBridgeGateway: gateway,
+        translationHistoryUseCase: historyUseCase,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('History'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.widgetWithText(TextFormField, 'Search history'), '晚安');
+    await tester.tap(find.text('Search'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Good night'), findsOneWidget);
+    expect(find.text('Hello world'), findsNothing);
+  });
+
+  testWidgets('ModelTranslation app clears history records', (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway();
+    final historyUseCase = FakeHistoryUseCase(
+      [
+        TranslationRecord(
+          id: 'record-1',
+          sourceText: 'Hello world',
+          translatedText: '你好，世界',
+          provider: 'openai-compatible',
+          model: 'gpt-4o-mini',
+          paramsJson: '{"temperature":0.2}',
+          status: TranslationStatus.success,
+          errorMessage: null,
+          createdAt: DateTime(2026, 4, 11),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ModelTranslationApp(
+        platformBridgeGateway: gateway,
+        translationHistoryUseCase: historyUseCase,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('History'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Clear all'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cleared 1 records'), findsOneWidget);
+    expect(find.text('Empty state'), findsOneWidget);
+  });
+
+  testWidgets('ModelTranslation app deletes a single history record', (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway();
+    final historyUseCase = FakeHistoryUseCase(
+      [
+        TranslationRecord(
+          id: 'record-1',
+          sourceText: 'Hello world',
+          translatedText: '你好，世界',
+          provider: 'openai-compatible',
+          model: 'gpt-4o-mini',
+          paramsJson: '{"temperature":0.2}',
+          status: TranslationStatus.success,
+          errorMessage: null,
+          createdAt: DateTime(2026, 4, 11, 10),
+        ),
+        TranslationRecord(
+          id: 'record-2',
+          sourceText: 'Good night',
+          translatedText: '晚安',
+          provider: 'openai-compatible',
+          model: 'gpt-4o-mini',
+          paramsJson: '{"temperature":0.2}',
+          status: TranslationStatus.success,
+          errorMessage: null,
+          createdAt: DateTime(2026, 4, 11, 11),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ModelTranslationApp(
+        platformBridgeGateway: gateway,
+        translationHistoryUseCase: historyUseCase,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('History'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(TextButton, 'Delete').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Deleted 1 record'), findsOneWidget);
+    expect(find.text('Hello world'), findsNothing);
+    expect(find.text('Good night'), findsOneWidget);
   });
 }

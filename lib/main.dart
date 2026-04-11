@@ -7,26 +7,38 @@ import 'core/bridge/method_channel_platform_bridge_gateway.dart';
 import 'core/domain/gateways/platform_bridge_gateway.dart';
 import 'core/application/translation_history_use_case.dart';
 import 'core/domain/translation_record.dart';
+import 'core/domain/gateways/llm_connection_tester.dart';
 import 'core/domain/gateways/llm_config_repository.dart';
 import 'core/domain/llm_config.dart';
+import 'core/application/translation_history_use_case_impl.dart';
+import 'infrastructure/in_memory_llm_config_repository.dart';
+import 'infrastructure/in_memory_record_repository.dart';
+import 'infrastructure/mock_llm_connection_tester.dart';
 
 void main() {
   runApp(ModelTranslationApp());
 }
 
 class ModelTranslationApp extends StatelessWidget {
+  static final InMemoryLlmConfigRepository _defaultConfigRepository = InMemoryLlmConfigRepository();
+  static final InMemoryRecordRepository _defaultRecordRepository = InMemoryRecordRepository();
+
   ModelTranslationApp({
     super.key,
     PlatformBridgeGateway? platformBridgeGateway,
     TranslationHistoryUseCase? translationHistoryUseCase,
-      LlmConfigRepository? llmConfigRepository,
+    LlmConfigRepository? llmConfigRepository,
+    LlmConnectionTester? llmConnectionTester,
   })  : platformBridgeGateway = platformBridgeGateway ?? _DefaultPlatformBridgeGateway(),
-      translationHistoryUseCase = translationHistoryUseCase,
-      llmConfigRepository = llmConfigRepository;
+        translationHistoryUseCase = translationHistoryUseCase ??
+            TranslationHistoryUseCaseImpl(repository: _defaultRecordRepository),
+        llmConfigRepository = llmConfigRepository ?? _defaultConfigRepository,
+        llmConnectionTester = llmConnectionTester ?? MockLlmConnectionTester();
 
   final PlatformBridgeGateway platformBridgeGateway;
   final TranslationHistoryUseCase? translationHistoryUseCase;
-    final LlmConfigRepository? llmConfigRepository;
+  final LlmConfigRepository? llmConfigRepository;
+  final LlmConnectionTester? llmConnectionTester;
 
   @override
   Widget build(BuildContext context) {
@@ -41,6 +53,7 @@ class ModelTranslationApp extends StatelessWidget {
         platformBridgeGateway: platformBridgeGateway,
         translationHistoryUseCase: translationHistoryUseCase,
         llmConfigRepository: llmConfigRepository,
+        llmConnectionTester: llmConnectionTester,
       ),
     );
   }
@@ -52,11 +65,13 @@ class TranslationShell extends StatefulWidget {
     required this.platformBridgeGateway,
     required this.translationHistoryUseCase,
     required this.llmConfigRepository,
+    required this.llmConnectionTester,
   });
 
   final PlatformBridgeGateway platformBridgeGateway;
   final TranslationHistoryUseCase? translationHistoryUseCase;
   final LlmConfigRepository? llmConfigRepository;
+  final LlmConnectionTester? llmConnectionTester;
 
   @override
   State<TranslationShell> createState() => _TranslationShellState();
@@ -66,6 +81,7 @@ class _TranslationShellState extends State<TranslationShell> {
   String? clipboardText;
   String statusMessage = 'Ready';
   bool supportsFloatingBubble = false;
+  bool hasOverlayPermission = true;
   BridgeCapabilities? capabilities;
   StreamSubscription? _eventSubscription;
 
@@ -83,6 +99,9 @@ class _TranslationShellState extends State<TranslationShell> {
 
   Future<void> _bootstrap() async {
     final bridgeCapabilities = await widget.platformBridgeGateway.getCapabilities();
+    final overlayPermission = bridgeCapabilities.supportsOverlay
+        ? await widget.platformBridgeGateway.hasOverlayPermissionGranted()
+        : true;
     if (!mounted) {
       return;
     }
@@ -90,6 +109,7 @@ class _TranslationShellState extends State<TranslationShell> {
     setState(() {
       capabilities = bridgeCapabilities;
       supportsFloatingBubble = bridgeCapabilities.supportsFloatingBubble;
+      hasOverlayPermission = overlayPermission;
       statusMessage = 'Bridge connected';
     });
 
@@ -101,6 +121,17 @@ class _TranslationShellState extends State<TranslationShell> {
   }
 
   Future<void> _startBubble() async {
+    if (!hasOverlayPermission) {
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        statusMessage = 'Overlay permission required to start floating bubble';
+      });
+      return;
+    }
+
     await widget.platformBridgeGateway.startFloatingBubble();
     if (!mounted) {
       return;
@@ -134,6 +165,17 @@ class _TranslationShellState extends State<TranslationShell> {
     });
   }
 
+  Future<void> _openOverlayPermissionSettings() async {
+    await widget.platformBridgeGateway.openOverlayPermissionSettings();
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      statusMessage = 'Opened overlay permission settings';
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -161,13 +203,16 @@ class _TranslationShellState extends State<TranslationShell> {
                 clipboardText: clipboardText,
                 statusMessage: statusMessage,
                 supportsFloatingBubble: supportsFloatingBubble,
+                hasOverlayPermission: hasOverlayPermission,
                 onStartBubble: _startBubble,
                 onStopBubble: _stopBubble,
                 onReadClipboard: _readClipboard,
+                onOpenOverlayPermissionSettings: _openOverlayPermissionSettings,
               ),
               _SettingsSection(
                 capabilities: capabilities,
                 llmConfigRepository: widget.llmConfigRepository,
+                llmConnectionTester: widget.llmConnectionTester,
               ),
               _HistorySection(translationHistoryUseCase: widget.translationHistoryUseCase),
             ],
@@ -184,18 +229,22 @@ class _ControlSection extends StatelessWidget {
     required this.clipboardText,
     required this.statusMessage,
     required this.supportsFloatingBubble,
+    required this.hasOverlayPermission,
     required this.onStartBubble,
     required this.onStopBubble,
     required this.onReadClipboard,
+    required this.onOpenOverlayPermissionSettings,
   });
 
   final ColorScheme colorScheme;
   final String? clipboardText;
   final String statusMessage;
   final bool supportsFloatingBubble;
+  final bool hasOverlayPermission;
   final Future<void> Function() onStartBubble;
   final Future<void> Function() onStopBubble;
   final Future<void> Function() onReadClipboard;
+  final Future<void> Function() onOpenOverlayPermissionSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -207,45 +256,56 @@ class _ControlSection extends StatelessWidget {
           color: colorScheme.surfaceContainerHighest,
           child: Padding(
             padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Core contracts ready.',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'Control the floating bubble and read clipboard content from the bridge.',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 20),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: [
-                    FilledButton(
-                      onPressed: supportsFloatingBubble ? onStartBubble : null,
-                      child: const Text('Start floating bubble'),
-                    ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Core contracts ready.',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Control the floating bubble and read clipboard content from the bridge.',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 20),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 12,
+                    children: [
+                      FilledButton(
+                        onPressed: (supportsFloatingBubble && hasOverlayPermission) ? onStartBubble : null,
+                        child: const Text('Start floating bubble'),
+                      ),
+                      OutlinedButton(
+                        onPressed: supportsFloatingBubble ? onStopBubble : null,
+                        child: const Text('Stop floating bubble'),
+                      ),
+                      TextButton(
+                        onPressed: onReadClipboard,
+                        child: const Text('Read clipboard'),
+                      ),
+                    ],
+                  ),
+                  if (!hasOverlayPermission) ...[
+                    const SizedBox(height: 12),
+                    const Text('Overlay permission required to start floating bubble'),
+                    const SizedBox(height: 8),
                     OutlinedButton(
-                      onPressed: supportsFloatingBubble ? onStopBubble : null,
-                      child: const Text('Stop floating bubble'),
-                    ),
-                    TextButton(
-                      onPressed: onReadClipboard,
-                      child: const Text('Read clipboard'),
+                      onPressed: onOpenOverlayPermissionSettings,
+                      child: const Text('Grant permission'),
                     ),
                   ],
-                ),
-                const SizedBox(height: 20),
-                Text('Status: $statusMessage'),
-                const SizedBox(height: 8),
-                Text(
-                  clipboardText == null ? 'Clipboard: empty' : 'Clipboard: $clipboardText',
-                ),
-              ],
+                  const SizedBox(height: 20),
+                  Text('Status: $statusMessage'),
+                  const SizedBox(height: 8),
+                  Text(
+                    clipboardText == null ? 'Clipboard: empty' : 'Clipboard: $clipboardText',
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -258,10 +318,12 @@ class _SettingsSection extends StatefulWidget {
   const _SettingsSection({
     required this.capabilities,
     required this.llmConfigRepository,
+    required this.llmConnectionTester,
   });
 
   final BridgeCapabilities? capabilities;
   final LlmConfigRepository? llmConfigRepository;
+  final LlmConnectionTester? llmConnectionTester;
 
   @override
   State<_SettingsSection> createState() => _SettingsSectionState();
@@ -372,6 +434,44 @@ class _SettingsSectionState extends State<_SettingsSection> {
     });
   }
 
+  Future<void> _testConnection() async {
+    final tester = widget.llmConnectionTester;
+    if (tester == null) {
+      return;
+    }
+
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      return;
+    }
+
+    final config = LlmConfig(
+      id: 'active-config',
+      provider: 'openai-compatible',
+      baseUrl: _baseUrlController.text.trim(),
+      apiKeyRef: _apiKeyRefController.text.trim().isEmpty ? null : _apiKeyRefController.text.trim(),
+      model: _modelController.text.trim(),
+      temperature: double.parse(_temperatureController.text.trim()),
+      topP: double.parse(_topPController.text.trim()),
+      maxTokens: int.parse(_maxTokensController.text.trim()),
+      timeoutMs: int.parse(_timeoutMsController.text.trim()),
+      systemPrompt: _systemPromptController.text.trim(),
+      updatedAt: DateTime.now(),
+    );
+
+    final result = await tester.test(config);
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      if (result.isSuccess) {
+        statusMessage = '${result.message ?? 'Connection success'} (${result.latencyMs ?? 0} ms)';
+      } else {
+        statusMessage = result.errorMessage ?? 'Connection failed';
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final bridge = widget.capabilities;
@@ -423,6 +523,11 @@ class _SettingsSectionState extends State<_SettingsSection> {
                   FilledButton(
                     onPressed: _saveConfig,
                     child: const Text('Save configuration'),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton(
+                    onPressed: _testConnection,
+                    child: const Text('Test connection'),
                   ),
                   const SizedBox(height: 12),
                   Text(statusMessage),
@@ -501,11 +606,18 @@ class _HistorySectionState extends State<_HistorySection> {
   String statusMessage = 'History source not connected';
   List<TranslationRecord> records = const <TranslationRecord>[];
   bool loading = true;
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     _loadHistory();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadHistory() async {
@@ -537,6 +649,78 @@ class _HistorySectionState extends State<_HistorySection> {
     });
   }
 
+  Future<void> _searchHistory() async {
+    final historyUseCase = widget.translationHistoryUseCase;
+    if (historyUseCase == null) {
+      return;
+    }
+
+    final query = _searchController.text.trim();
+    final result = query.isEmpty
+        ? await historyUseCase.loadRecent(limit: 20)
+        : await historyUseCase.search(query);
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      if (result.isSuccess && result.value != null) {
+        records = result.value!;
+        if (query.isEmpty) {
+          statusMessage = records.isEmpty ? 'No history yet' : 'Loaded ${records.length} records';
+        } else {
+          statusMessage = 'Search found ${records.length} records';
+        }
+      } else {
+        statusMessage = result.failure?.message ?? 'History search failed';
+      }
+    });
+  }
+
+  Future<void> _clearAll() async {
+    final historyUseCase = widget.translationHistoryUseCase;
+    if (historyUseCase == null) {
+      return;
+    }
+
+    final result = await historyUseCase.clearAll();
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      if (result.isSuccess) {
+        final deleted = result.value ?? 0;
+        records = const <TranslationRecord>[];
+        statusMessage = 'Cleared $deleted records';
+      } else {
+        statusMessage = result.failure?.message ?? 'Failed to clear history';
+      }
+    });
+  }
+
+  Future<void> _deleteRecord(String id) async {
+    final historyUseCase = widget.translationHistoryUseCase;
+    if (historyUseCase == null) {
+      return;
+    }
+
+    final result = await historyUseCase.deleteById(id);
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      if (result.isSuccess) {
+        records = records.where((record) => record.id != id).toList();
+        statusMessage = 'Deleted 1 record';
+      } else {
+        statusMessage = result.failure?.message ?? 'Failed to delete record';
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     if (loading) {
@@ -551,6 +735,29 @@ class _HistorySectionState extends State<_HistorySection> {
         ),
         const SizedBox(height: 12),
         Text(statusMessage),
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            Expanded(
+              child: TextFormField(
+                controller: _searchController,
+                decoration: const InputDecoration(
+                  labelText: 'Search history',
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            FilledButton(
+              onPressed: _searchHistory,
+              child: const Text('Search'),
+            ),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              onPressed: records.isEmpty ? null : _clearAll,
+              child: const Text('Clear all'),
+            ),
+          ],
+        ),
         const SizedBox(height: 20),
         if (records.isEmpty)
           const _SummaryCard(
@@ -570,6 +777,10 @@ class _HistorySectionState extends State<_HistorySection> {
                   'Status: ${record.status.name}',
                   'Model: ${record.model}',
                 ],
+                trailing: TextButton(
+                  onPressed: () => _deleteRecord(record.id),
+                  child: const Text('Delete'),
+                ),
               ),
             ),
           ),
@@ -579,10 +790,11 @@ class _HistorySectionState extends State<_HistorySection> {
 }
 
 class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({required this.title, required this.lines});
+  const _SummaryCard({required this.title, required this.lines, this.trailing});
 
   final String title;
   final List<String> lines;
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -593,7 +805,12 @@ class _SummaryCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: Theme.of(context).textTheme.titleMedium),
+            Row(
+              children: [
+                Expanded(child: Text(title, style: Theme.of(context).textTheme.titleMedium)),
+                if (trailing != null) trailing!,
+              ],
+            ),
             const SizedBox(height: 8),
             for (final line in lines)
               Padding(

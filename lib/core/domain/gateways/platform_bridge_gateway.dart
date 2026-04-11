@@ -21,6 +21,10 @@ abstract class PlatformBridgeGateway {
 
   Future<String?> getClipboardText();
 
+  Future<bool> hasOverlayPermissionGranted();
+
+  Future<void> openOverlayPermissionSettings();
+
   Future<void> startFloatingBubble();
 
   Future<void> stopFloatingBubble();
