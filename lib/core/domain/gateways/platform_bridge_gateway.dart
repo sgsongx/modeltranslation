@@ -25,6 +25,8 @@ abstract class PlatformBridgeGateway {
 
   Future<void> openOverlayPermissionSettings();
 
+  Future<void> setDiagnosticsEnabled(bool enabled);
+
   Future<void> startFloatingBubble();
 
   Future<void> stopFloatingBubble();

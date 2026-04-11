@@ -15,6 +15,7 @@ import android.os.IBinder
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import android.util.Log
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -25,19 +26,26 @@ class FloatingBubbleService : Service() {
 	private lateinit var windowManager: WindowManager
 	private var bubbleView: View? = null
 	private var resultOverlayView: View? = null
+	private var diagnosticsEnabled: Boolean = false
 
 	override fun onCreate() {
 		super.onCreate()
 		windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 		ensureChannel(this)
+		trace("service.create")
 		createOverlayBubble()
 		startForeground(NOTIFICATION_ID, buildNotification())
 	}
 
 	override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+		diagnosticsEnabled = intent?.getBooleanExtra(EXTRA_DIAGNOSTICS_ENABLED, diagnosticsEnabled) ?: diagnosticsEnabled
 		when (intent?.action) {
-			ACTION_STOP -> stopSelf()
+			ACTION_STOP -> {
+				trace("service.stop")
+				stopSelf()
+			}
 			ACTION_SHOW_RESULT -> {
+				trace("service.showResult")
 				if (bubbleView == null) {
 					createOverlayBubble()
 				}
@@ -47,8 +55,12 @@ class FloatingBubbleService : Service() {
 					showRetry = intent.getBooleanExtra(EXTRA_SHOW_RETRY, false),
 				)
 			}
-			ACTION_HIDE_RESULT -> hideResultOverlay()
+			ACTION_HIDE_RESULT -> {
+				trace("service.hideResult")
+				hideResultOverlay()
+			}
 			else -> {
+				trace("service.keepAlive")
 				if (bubbleView == null) {
 					createOverlayBubble()
 				}
@@ -69,6 +81,7 @@ class FloatingBubbleService : Service() {
 		if (bubbleView != null) {
 			return
 		}
+		trace("service.bubble.create")
 
 		val bubble = FrameLayout(this).apply {
 			setBackgroundResource(android.R.drawable.btn_default_small)
@@ -108,11 +121,13 @@ class FloatingBubbleService : Service() {
 	}
 
 	private fun releaseBubble() {
+		trace("service.bubble.release")
 		bubbleView?.let { windowManager.removeView(it) }
 		bubbleView = null
 	}
 
 	private fun showResultOverlay(title: String, message: String, showRetry: Boolean) {
+		trace("service.overlay.show title=$title messageLength=${message.length} showRetry=$showRetry")
 		hideResultOverlay()
 
 		val container = LinearLayout(this).apply {
@@ -189,16 +204,19 @@ class FloatingBubbleService : Service() {
 	}
 
 	private fun hideResultOverlay() {
+		trace("service.overlay.hide")
 		resultOverlayView?.let { windowManager.removeView(it) }
 		resultOverlayView = null
 	}
 
 	private fun copyToClipboard(message: String) {
+		trace("service.overlay.copy messageLength=${message.length}")
 		val clipboardManager = getSystemService(CLIPBOARD_SERVICE) as? ClipboardManager ?: return
 		clipboardManager.setPrimaryClip(ClipData.newPlainText("translation_result", message))
 	}
 
 	private fun launchTranslationAction() {
+		trace("service.overlay.launchTranslationAction")
 		val launchIntent = Intent(this, MainActivity::class.java).apply {
 			addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
 			putExtra(EXTRA_ACTION_ID, ACTION_TRANSLATE_CLIPBOARD)
@@ -207,6 +225,7 @@ class FloatingBubbleService : Service() {
 	}
 
 	private fun buildNotification(): Notification {
+		trace("service.notification.build")
 		val contentIntent = PendingIntent.getActivity(
 			this,
 			0,
@@ -240,12 +259,14 @@ class FloatingBubbleService : Service() {
 		const val EXTRA_RESULT_TITLE = "extra_result_title"
 		const val EXTRA_RESULT_MESSAGE = "extra_result_message"
 		const val EXTRA_SHOW_RETRY = "extra_show_retry"
+		const val EXTRA_DIAGNOSTICS_ENABLED = "extra_diagnostics_enabled"
 		private const val CHANNEL_ID = "modeltranslation.floating_bubble"
 		private const val NOTIFICATION_ID = 1001
 
-		fun start(context: Context) {
+		fun start(context: Context, diagnosticsEnabled: Boolean = false) {
 			val intent = Intent(context, FloatingBubbleService::class.java).apply {
 				action = ACTION_START
+				putExtra(EXTRA_DIAGNOSTICS_ENABLED, diagnosticsEnabled)
 			}
 			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 				context.startForegroundService(intent)
@@ -254,29 +275,38 @@ class FloatingBubbleService : Service() {
 			}
 		}
 
-		fun stop(context: Context) {
+		fun stop(context: Context, diagnosticsEnabled: Boolean = false) {
 			context.startService(
 				Intent(context, FloatingBubbleService::class.java).apply {
 					action = ACTION_STOP
+					putExtra(EXTRA_DIAGNOSTICS_ENABLED, diagnosticsEnabled)
 				}
 			)
 		}
 
-		fun showResult(context: Context, title: String, message: String, showRetry: Boolean = false) {
+		fun showResult(
+			context: Context,
+			title: String,
+			message: String,
+			showRetry: Boolean = false,
+			diagnosticsEnabled: Boolean = false,
+		) {
 			context.startService(
 				Intent(context, FloatingBubbleService::class.java).apply {
 					action = ACTION_SHOW_RESULT
 					putExtra(EXTRA_RESULT_TITLE, title)
 					putExtra(EXTRA_RESULT_MESSAGE, message)
 					putExtra(EXTRA_SHOW_RETRY, showRetry)
+					putExtra(EXTRA_DIAGNOSTICS_ENABLED, diagnosticsEnabled)
 				}
 			)
 		}
 
-		fun hideResult(context: Context) {
+		fun hideResult(context: Context, diagnosticsEnabled: Boolean = false) {
 			context.startService(
 				Intent(context, FloatingBubbleService::class.java).apply {
 					action = ACTION_HIDE_RESULT
+					putExtra(EXTRA_DIAGNOSTICS_ENABLED, diagnosticsEnabled)
 				}
 			)
 		}
@@ -298,6 +328,13 @@ class FloatingBubbleService : Service() {
 					NotificationManager.IMPORTANCE_LOW,
 				)
 			)
+		}
+
+	}
+
+	private fun trace(message: String) {
+		if (diagnosticsEnabled) {
+			Log.d("FloatingBubbleService", message)
 		}
 	}
 }

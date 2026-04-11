@@ -39,6 +39,9 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   Future<void> openOverlayPermissionSettings() async {}
 
   @override
+  Future<void> setDiagnosticsEnabled(bool enabled) async {}
+
+  @override
   Future<void> showOverlay({required String title, required String message}) async {}
 
   @override

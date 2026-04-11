@@ -26,6 +26,8 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   int showOverlayCalls = 0;
   int hideOverlayCalls = 0;
   int openOverlaySettingsCalls = 0;
+  int setDiagnosticsEnabledCalls = 0;
+  bool? lastDiagnosticsEnabled;
   String? lastOverlayTitle;
   String? lastOverlayMessage;
   String? clipboardText;
@@ -61,6 +63,12 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   @override
   Future<void> openOverlayPermissionSettings() async {
     openOverlaySettingsCalls++;
+  }
+
+  @override
+  Future<void> setDiagnosticsEnabled(bool enabled) async {
+    setDiagnosticsEnabledCalls++;
+    lastDiagnosticsEnabled = enabled;
   }
 
   @override
@@ -179,6 +187,21 @@ void main() {
 
     expect(gateway.startCalls, 1);
     expect(gateway.stopCalls, 1);
+  });
+
+  testWidgets('ModelTranslation app propagates diagnostics toggle to the bridge', (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway();
+
+    await tester.pumpWidget(
+      ModelTranslationApp(
+        platformBridgeGateway: gateway,
+        enableDiagnosticsLogging: true,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(gateway.setDiagnosticsEnabledCalls, 1);
+    expect(gateway.lastDiagnosticsEnabled, isTrue);
   });
 
   testWidgets('ModelTranslation app renders clipboard text from the gateway', (WidgetTester tester) async {

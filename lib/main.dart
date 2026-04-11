@@ -21,6 +21,7 @@ import 'core/domain/gateways/secret_vault.dart';
 import 'core/domain/llm_config.dart';
 import 'core/domain/actions/action_invocation_context.dart';
 import 'core/application/translation_history_use_case_impl.dart';
+import 'infrastructure/debug_trace_logger.dart';
 import 'infrastructure/http_llm_gateway.dart';
 import 'infrastructure/in_memory_llm_config_repository.dart';
 import 'infrastructure/in_memory_record_repository.dart';
@@ -33,6 +34,10 @@ import 'infrastructure/vault_api_key_provider.dart';
 
 void main() {
   runApp(ModelTranslationApp(enableHttpLlmGateway: true));
+}
+
+DebugTraceLogger _diagnosticsLogger(bool enabled) {
+  return enabled ? DebugTraceLogger.enabled() : DebugTraceLogger.disabled();
 }
 
 class ModelTranslationApp extends StatelessWidget {
@@ -64,10 +69,12 @@ class ModelTranslationApp extends StatelessWidget {
     ActionRegistry? actionRegistry,
     ApiKeySecurityUseCase? apiKeySecurityUseCase,
     bool enableHttpLlmGateway = false,
+    bool enableDiagnosticsLogging = const bool.fromEnvironment('MODELTRANSLATION_DEBUG_LOGGING'),
     LlmConnectionTester? llmConnectionTester,
   })  : platformBridgeGateway = platformBridgeGateway ?? _DefaultPlatformBridgeGateway(),
         llmConfigRepository = llmConfigRepository ?? _defaultConfigRepository,
         secretVault = secretVault ?? InMemorySecretVault(),
+      enableDiagnosticsLogging = enableDiagnosticsLogging,
         llmGateway = llmGateway ??
             (enableHttpLlmGateway
                 ? HttpLlmGateway(
@@ -90,6 +97,7 @@ class ModelTranslationApp extends StatelessWidget {
               idProvider: () => DateTime.now().microsecondsSinceEpoch.toString(),
               targetLang: 'zh',
               stylePreset: 'concise',
+              debugLogger: _diagnosticsLogger(enableDiagnosticsLogging),
             ),
         actionRegistry = actionRegistry ??
             buildDefaultActionRegistry(
@@ -111,6 +119,7 @@ class ModelTranslationApp extends StatelessWidget {
                     idProvider: () => DateTime.now().microsecondsSinceEpoch.toString(),
                     targetLang: 'zh',
                     stylePreset: 'concise',
+                    debugLogger: _diagnosticsLogger(enableDiagnosticsLogging),
                   ),
             ),
         apiKeySecurityUseCase = apiKeySecurityUseCase ??
@@ -138,6 +147,7 @@ class ModelTranslationApp extends StatelessWidget {
   final TranslateClipboardUseCase? translateClipboardUseCase;
   final ActionRegistry? actionRegistry;
   final ApiKeySecurityUseCase? apiKeySecurityUseCase;
+  final bool enableDiagnosticsLogging;
   final LlmConnectionTester? llmConnectionTester;
 
   @override
@@ -155,6 +165,7 @@ class ModelTranslationApp extends StatelessWidget {
         llmConfigRepository: llmConfigRepository,
         actionRegistry: actionRegistry,
         apiKeySecurityUseCase: apiKeySecurityUseCase,
+        enableDiagnosticsLogging: enableDiagnosticsLogging,
         llmConnectionTester: llmConnectionTester,
       ),
     );
@@ -169,6 +180,7 @@ class TranslationShell extends StatefulWidget {
     required this.llmConfigRepository,
     required this.actionRegistry,
     required this.apiKeySecurityUseCase,
+    required this.enableDiagnosticsLogging,
     required this.llmConnectionTester,
   });
 
@@ -177,6 +189,7 @@ class TranslationShell extends StatefulWidget {
   final LlmConfigRepository? llmConfigRepository;
   final ActionRegistry? actionRegistry;
   final ApiKeySecurityUseCase? apiKeySecurityUseCase;
+  final bool enableDiagnosticsLogging;
   final LlmConnectionTester? llmConnectionTester;
 
   @override
@@ -204,6 +217,7 @@ class _TranslationShellState extends State<TranslationShell> {
   }
 
   Future<void> _bootstrap() async {
+    await widget.platformBridgeGateway.setDiagnosticsEnabled(widget.enableDiagnosticsLogging);
     final bridgeCapabilities = await widget.platformBridgeGateway.getCapabilities();
     final overlayPermission = bridgeCapabilities.supportsOverlay
         ? await widget.platformBridgeGateway.hasOverlayPermissionGranted()

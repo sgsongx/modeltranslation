@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -49,9 +50,14 @@ class MainActivity : FlutterActivity() {
 
 	private fun consumePendingAction() {
 		val currentActionId = pendingActionId ?: return
+		trace("bridge.pendingAction:emit actionId=$currentActionId")
 		bridge?.emitAction(currentActionId, pendingPayload)
 		pendingActionId = null
 		pendingPayload = emptyMap()
+	}
+
+	private fun trace(message: String) {
+		bridge?.trace(message)
 	}
 }
 
@@ -62,6 +68,7 @@ private class ModelTranslationBridge(
 	private val methodChannel = MethodChannel(messenger, METHOD_CHANNEL_NAME)
 	private val eventChannel = EventChannel(messenger, EVENT_CHANNEL_NAME)
 	private var eventSink: EventChannel.EventSink? = null
+	private var diagnosticsEnabled = false
 
 	init {
 		methodChannel.setMethodCallHandler(this)
@@ -70,6 +77,11 @@ private class ModelTranslationBridge(
 
 	override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
 		when (call.method) {
+			"setDiagnosticsEnabled" -> {
+				diagnosticsEnabled = call.arguments as? Boolean ?: false
+				trace("diagnostics.enabled=$diagnosticsEnabled")
+				result.success(true)
+			}
 			"getClipboardText" -> result.success(readClipboardText())
 			"hasOverlayPermission" -> result.success(hasOverlayPermission())
 			"openOverlayPermissionSettings" -> result.success(openOverlayPermissionSettings())
@@ -101,6 +113,7 @@ private class ModelTranslationBridge(
 	}
 
 	private fun hasOverlayPermission(): Boolean {
+		trace("bridge.overlay.permission:check")
 		return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
 			Settings.canDrawOverlays(applicationContext)
 		} else {
@@ -109,6 +122,7 @@ private class ModelTranslationBridge(
 	}
 
 	private fun openOverlayPermissionSettings(): Boolean {
+		trace("bridge.overlay.permission:openSettings")
 		if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
 			return true
 		}
@@ -127,18 +141,21 @@ private class ModelTranslationBridge(
 		val title = call.argument<String>("title") ?: "Translation Result"
 		val message = call.argument<String>("message") ?: ""
 		val showRetry = title == "Translation Error"
+		trace("bridge.overlay.show title=$title messageLength=${message.length} showRetry=$showRetry")
 		FloatingBubbleService.ensureChannel(applicationContext)
-		FloatingBubbleService.start(applicationContext)
-		FloatingBubbleService.showResult(applicationContext, title, message, showRetry)
+		FloatingBubbleService.start(applicationContext, diagnosticsEnabled)
+		FloatingBubbleService.showResult(applicationContext, title, message, showRetry, diagnosticsEnabled)
 		return true
 	}
 
 	private fun hideOverlay(): Boolean {
-		FloatingBubbleService.hideResult(applicationContext)
+		trace("bridge.overlay.hide")
+		FloatingBubbleService.hideResult(applicationContext, diagnosticsEnabled)
 		return true
 	}
 
 	private fun readClipboardText(): String? {
+		trace("bridge.clipboard.read")
 		val clipboardManager = applicationContext.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
 			?: return null
 		val primaryClip: ClipData = clipboardManager.primaryClip ?: return null
@@ -151,6 +168,7 @@ private class ModelTranslationBridge(
 	}
 
 	fun emitAction(actionId: String, payload: Map<String, Any?>) {
+		trace("bridge.event.emit actionId=$actionId payloadSize=${payload.size}")
 		eventSink?.success(
 			mapOf(
 				"kind" to "action",
@@ -167,13 +185,21 @@ private class ModelTranslationBridge(
 	}
 
 	private fun startFloatingBubble(): Boolean {
+		trace("bridge.bubble.start")
 		FloatingBubbleService.ensureChannel(applicationContext)
-		FloatingBubbleService.start(applicationContext)
+		FloatingBubbleService.start(applicationContext, diagnosticsEnabled)
 		return true
 	}
 
 	private fun stopFloatingBubble(): Boolean {
-		FloatingBubbleService.stop(applicationContext)
+		trace("bridge.bubble.stop")
+		FloatingBubbleService.stop(applicationContext, diagnosticsEnabled)
 		return true
+	}
+
+	fun trace(message: String) {
+		if (diagnosticsEnabled) {
+			Log.d("ModelTranslationBridge", message)
+		}
 	}
 }
