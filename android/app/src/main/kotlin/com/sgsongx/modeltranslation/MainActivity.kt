@@ -66,7 +66,7 @@ class MainActivity : FlutterActivity() {
 					moveTaskToBack(true)
 					overridePendingTransition(0, 0)
 					trace("moved to background after floating bubble launch")
-				}, 100)
+				}, 16)
 			}
 
 			consumePendingAction()
