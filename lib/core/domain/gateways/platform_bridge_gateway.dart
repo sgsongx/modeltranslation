@@ -31,6 +31,8 @@ abstract class PlatformBridgeGateway {
 
   Future<void> stopFloatingBubble();
 
+  Future<void> moveAppToBackground();
+
   Future<void> showOverlay({required String title, required String message});
 
   Future<void> hideOverlay();

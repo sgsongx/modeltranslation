@@ -52,6 +52,9 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   Future<void> stopFloatingBubble() async {}
 
   @override
+  Future<void> moveAppToBackground() async {}
+
+  @override
   Stream<BridgeEvent> watchActionEvents() => _eventController.stream;
 }
 

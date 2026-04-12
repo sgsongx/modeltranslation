@@ -255,6 +255,11 @@ class _TranslationShellState extends State<TranslationShell> {
       return;
     }
 
+    final source = event.payload['source'] as String?;
+    if (source == 'floating_bubble') {
+      await widget.platformBridgeGateway.moveAppToBackground();
+    }
+
     if (event.payload['translatedText'] == null && event.payload['errorMessage'] == null) {
       final actionRegistry = widget.actionRegistry;
       if (actionRegistry != null) {

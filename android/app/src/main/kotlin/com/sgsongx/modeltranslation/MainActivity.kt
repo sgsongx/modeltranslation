@@ -35,6 +35,7 @@ class MainActivity : FlutterActivity() {
 		bridge = ModelTranslationBridge(
 			applicationContext = applicationContext,
 			messenger = flutterEngine.dartExecutor.binaryMessenger,
+			moveTaskToBack = { moveTaskToBack(true) },
 		)
 		consumePendingAction()
 	}
@@ -43,7 +44,9 @@ class MainActivity : FlutterActivity() {
 		val actionId = intent?.getStringExtra(FloatingBubbleService.EXTRA_ACTION_ID)
 		if (actionId != null) {
 			pendingActionId = actionId
-			pendingPayload = emptyMap()
+			pendingPayload = mapOf(
+				"source" to "floating_bubble",
+			)
 			consumePendingAction()
 		}
 	}
@@ -64,10 +67,12 @@ class MainActivity : FlutterActivity() {
 private class ModelTranslationBridge(
 	private val applicationContext: Context,
 	messenger: io.flutter.plugin.common.BinaryMessenger,
+	private val moveTaskToBack: () -> Boolean,
 ) : MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
 	private val methodChannel = MethodChannel(messenger, METHOD_CHANNEL_NAME)
 	private val eventChannel = EventChannel(messenger, EVENT_CHANNEL_NAME)
 	private var eventSink: EventChannel.EventSink? = null
+	private val pendingEvents: MutableList<Map<String, Any?>> = mutableListOf()
 	private var diagnosticsEnabled = false
 
 	init {
@@ -87,6 +92,7 @@ private class ModelTranslationBridge(
 			"openOverlayPermissionSettings" -> result.success(openOverlayPermissionSettings())
 			"startFloatingBubble" -> result.success(startFloatingBubble())
 			"stopFloatingBubble" -> result.success(stopFloatingBubble())
+			"moveTaskToBack" -> result.success(moveTaskToBack())
 			"showOverlay" -> result.success(showOverlay(call))
 			"hideOverlay" -> result.success(hideOverlay())
 			"getBridgeCapabilities" -> {
@@ -106,6 +112,7 @@ private class ModelTranslationBridge(
 
 	override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
 		eventSink = events
+		flushPendingEvents()
 	}
 
 	override fun onCancel(arguments: Any?) {
@@ -169,14 +176,32 @@ private class ModelTranslationBridge(
 
 	fun emitAction(actionId: String, payload: Map<String, Any?>) {
 		trace("bridge.event.emit actionId=$actionId payloadSize=${payload.size}")
-		eventSink?.success(
-			mapOf(
-				"kind" to "action",
-				"actionId" to actionId,
-				"payload" to payload,
-				"createdAt" to System.currentTimeMillis().toString(),
-			)
+		val event = mapOf(
+			"kind" to "action",
+			"actionId" to actionId,
+			"payload" to payload,
+			"createdAt" to System.currentTimeMillis().toString(),
 		)
+
+		val sink = eventSink
+		if (sink != null) {
+			sink.success(event)
+			return
+		}
+
+		pendingEvents.add(event)
+		trace("bridge.event.queue size=${pendingEvents.size}")
+	}
+
+	private fun flushPendingEvents() {
+		val sink = eventSink ?: return
+		if (pendingEvents.isEmpty()) {
+			return
+		}
+
+		trace("bridge.event.flush count=${pendingEvents.size}")
+		pendingEvents.forEach { sink.success(it) }
+		pendingEvents.clear()
 	}
 
 	companion object {

@@ -15,13 +15,13 @@ class BridgeProtocol {
     final kindValue = data['kind'];
     final actionId = data['actionId'] as String?;
     final payload = _readPayload(data['payload']);
-    final createdAtValue = data['createdAt'] as String?;
+    final createdAtValue = data['createdAt'];
 
     if (kindValue is! String || actionId == null || createdAtValue == null) {
       throw const FormatException('Invalid bridge event payload.');
     }
 
-    final createdAt = DateTime.parse(createdAtValue);
+    final createdAt = _parseCreatedAt(createdAtValue);
     switch (kindValue) {
       case 'action':
         return BridgeEvent.action(
@@ -88,5 +88,31 @@ class BridgeProtocol {
     }
 
     return <String, Object?>{};
+  }
+
+  static DateTime _parseCreatedAt(Object value) {
+    if (value is int) {
+      return DateTime.fromMillisecondsSinceEpoch(value);
+    }
+
+    if (value is num) {
+      return DateTime.fromMillisecondsSinceEpoch(value.toInt());
+    }
+
+    if (value is String) {
+      final normalized = value.trim();
+      if (normalized.isEmpty) {
+        throw const FormatException('Invalid date format');
+      }
+
+      final epochMillis = int.tryParse(normalized);
+      if (epochMillis != null) {
+        return DateTime.fromMillisecondsSinceEpoch(epochMillis);
+      }
+
+      return DateTime.parse(normalized);
+    }
+
+    throw const FormatException('Invalid date format');
   }
 }

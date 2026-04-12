@@ -24,6 +24,7 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   final StreamController<BridgeEvent> _eventController = StreamController<BridgeEvent>.broadcast();
   int startCalls = 0;
   int stopCalls = 0;
+  int moveToBackgroundCalls = 0;
   int showOverlayCalls = 0;
   int hideOverlayCalls = 0;
   int openOverlaySettingsCalls = 0;
@@ -92,6 +93,11 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   @override
   Future<void> stopFloatingBubble() async {
     stopCalls++;
+  }
+
+  @override
+  Future<void> moveAppToBackground() async {
+    moveToBackgroundCalls++;
   }
 
   @override
@@ -269,6 +275,20 @@ void main() {
     expect(gateway.showOverlayCalls, 1);
     expect(gateway.lastOverlayTitle, 'Translation Result');
     expect(gateway.lastOverlayMessage, 'Hello from clipboard');
+  });
+
+  testWidgets('ModelTranslation app moves to background for floating bubble action', (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway()
+      ..clipboardText = 'Hello from clipboard';
+
+    await tester.pumpWidget(ModelTranslationApp(platformBridgeGateway: gateway));
+    await tester.pumpAndSettle();
+
+    gateway.emitActionEvent('translate_clipboard', payload: <String, Object?>{'source': 'floating_bubble'});
+    await tester.pumpAndSettle();
+
+    expect(gateway.moveToBackgroundCalls, 1);
+    expect(gateway.showOverlayCalls, 1);
   });
 
   testWidgets('ModelTranslation app prefers translatedText from action payload', (WidgetTester tester) async {

@@ -34,6 +34,20 @@ void main() {
     expect(decoded.message, '你好，世界');
   });
 
+  test('BridgeProtocol decodes action events with epoch millis createdAt', () {
+    final decoded = BridgeProtocol.decodeEvent(<String, Object?>{
+      'kind': 'action',
+      'actionId': 'translate_clipboard',
+      'payload': <String, Object?>{'source': 'floating_bubble'},
+      'createdAt': '1775962818715',
+    });
+
+    expect(decoded.kind, BridgeEventKind.action);
+    expect(decoded.actionId, 'translate_clipboard');
+    expect(decoded.payload['source'], 'floating_bubble');
+    expect(decoded.createdAt.millisecondsSinceEpoch, 1775962818715);
+  });
+
   test('BridgeProtocol rejects invalid payloads', () {
     expect(
       () => BridgeProtocol.decodeEvent(<String, Object?>{'kind': 'unknown'}),

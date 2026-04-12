@@ -83,6 +83,12 @@ class MethodChannelPlatformBridgeGateway implements PlatformBridgeGateway {
   }
 
   @override
+  Future<void> moveAppToBackground() async {
+    _trace('platform.app.moveToBackground:start');
+    await _methodChannel.invokeMethod<void>('moveTaskToBack');
+  }
+
+  @override
   Stream<BridgeEvent> watchActionEvents() {
     return _eventChannel.receiveBroadcastStream().map((event) {
       _trace('platform.event.receive');
