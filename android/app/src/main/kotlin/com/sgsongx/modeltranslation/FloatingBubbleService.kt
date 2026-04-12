@@ -218,7 +218,7 @@ class FloatingBubbleService : Service() {
 	private fun launchTranslationAction() {
 		trace("service.overlay.launchTranslationAction")
 		val launchIntent = Intent(this, MainActivity::class.java).apply {
-			addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+			addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NO_ANIMATION)
 			putExtra(EXTRA_ACTION_ID, ACTION_TRANSLATE_CLIPBOARD)
 			putExtra(EXTRA_FROM_FLOATING_BUBBLE, true)
 		}

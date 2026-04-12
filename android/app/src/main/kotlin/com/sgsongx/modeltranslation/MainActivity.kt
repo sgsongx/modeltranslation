@@ -20,13 +20,22 @@ class MainActivity : FlutterActivity() {
 	private var pendingPayload: Map<String, Any?> = emptyMap()
 
 	override fun onCreate(savedInstanceState: android.os.Bundle?) {
+		if (isFloatingBubbleLaunch(intent)) {
+			setTheme(R.style.BubbleBridgeTheme)
+		}
 		super.onCreate(savedInstanceState)
+		if (isFloatingBubbleLaunch(intent)) {
+			overridePendingTransition(0, 0)
+		}
 		consumeIntent(intent)
 	}
 
 	override fun onNewIntent(intent: Intent) {
 		super.onNewIntent(intent)
 		setIntent(intent)
+		if (isFloatingBubbleLaunch(intent)) {
+			overridePendingTransition(0, 0)
+		}
 		consumeIntent(intent)
 	}
 
@@ -55,6 +64,7 @@ class MainActivity : FlutterActivity() {
 			if (fromFloatingBubble) {
 				android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
 					moveTaskToBack(true)
+					overridePendingTransition(0, 0)
 					trace("moved to background after floating bubble launch")
 				}, 100)
 			}
@@ -85,6 +95,14 @@ class MainActivity : FlutterActivity() {
 
 	private fun trace(message: String) {
 		bridge?.trace(message)
+	}
+
+	private fun isFloatingBubbleLaunch(intent: Intent?): Boolean {
+		if (intent == null) {
+			return false
+		}
+
+		return intent.getBooleanExtra(FloatingBubbleService.EXTRA_FROM_FLOATING_BUBBLE, false)
 	}
 }
 
