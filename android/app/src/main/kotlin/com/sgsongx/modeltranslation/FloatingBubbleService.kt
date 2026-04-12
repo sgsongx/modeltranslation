@@ -11,7 +11,9 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -21,17 +23,25 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
+import io.flutter.FlutterInjector
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.dart.DartExecutor
+import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugins.GeneratedPluginRegistrant
 
 class FloatingBubbleService : Service() {
 	private lateinit var windowManager: WindowManager
 	private var bubbleView: View? = null
 	private var resultOverlayView: View? = null
 	private var diagnosticsEnabled: Boolean = false
+	private var backgroundEngine: FlutterEngine? = null
+	private var backgroundChannel: MethodChannel? = null
 
 	override fun onCreate() {
 		super.onCreate()
 		windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 		ensureChannel(this)
+		ensureBackgroundEngine()
 		trace("service.create")
 		createOverlayBubble()
 		startForeground(NOTIFICATION_ID, buildNotification())
@@ -72,6 +82,9 @@ class FloatingBubbleService : Service() {
 	override fun onDestroy() {
 		hideResultOverlay()
 		releaseBubble()
+		backgroundChannel = null
+		backgroundEngine?.destroy()
+		backgroundEngine = null
 		super.onDestroy()
 	}
 
@@ -217,11 +230,119 @@ class FloatingBubbleService : Service() {
 
 	private fun launchTranslationAction() {
 		trace("service.overlay.launchTranslationAction")
-		val launchIntent = Intent(this, MainActivity::class.java).apply {
-			addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-			putExtra(EXTRA_ACTION_ID, ACTION_TRANSLATE_CLIPBOARD)
+
+		val clipboardText = readClipboardText()
+		if (clipboardText.isNullOrBlank()) {
+			showResultOverlay(
+				title = "Translation Error",
+				message = "Clipboard is empty",
+				showRetry = true,
+			)
+			return
 		}
-		startActivity(launchIntent)
+
+		ensureBackgroundEngine()
+		val channel = backgroundChannel
+		if (channel == null) {
+			showResultOverlay(
+				title = "Translation Error",
+				message = "Background translation channel unavailable",
+				showRetry = true,
+			)
+			return
+		}
+
+		trace("service.translation.invoke length=${clipboardText.length}")
+		channel.invokeMethod(
+			"translateClipboard",
+			mapOf("clipboardText" to clipboardText),
+			object : MethodChannel.Result {
+				override fun success(result: Any?) {
+					handleBackgroundResult(result)
+				}
+
+				override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+					Handler(Looper.getMainLooper()).post {
+						showResultOverlay(
+							title = "Translation Error",
+							message = errorMessage ?: "Background translation failed ($errorCode)",
+							showRetry = true,
+						)
+					}
+				}
+
+				override fun notImplemented() {
+					Handler(Looper.getMainLooper()).post {
+						showResultOverlay(
+							title = "Translation Error",
+							message = "Background translation method is not implemented",
+							showRetry = true,
+						)
+					}
+				}
+			},
+		)
+	}
+
+	private fun ensureBackgroundEngine() {
+		if (backgroundEngine != null && backgroundChannel != null) {
+			return
+		}
+
+		val flutterLoader = FlutterInjector.instance().flutterLoader()
+		if (!flutterLoader.initialized()) {
+			flutterLoader.startInitialization(applicationContext)
+			flutterLoader.ensureInitializationComplete(applicationContext, null)
+		}
+
+		val engine = FlutterEngine(applicationContext)
+		GeneratedPluginRegistrant.registerWith(engine)
+		val entrypoint = DartExecutor.DartEntrypoint(
+			flutterLoader.findAppBundlePath(),
+			BACKGROUND_DART_ENTRYPOINT,
+		)
+		engine.dartExecutor.executeDartEntrypoint(entrypoint)
+
+		backgroundEngine = engine
+		backgroundChannel = MethodChannel(engine.dartExecutor.binaryMessenger, BACKGROUND_CHANNEL_NAME)
+		trace("service.backgroundEngine.ready")
+	}
+
+	private fun handleBackgroundResult(result: Any?) {
+		@Suppress("UNCHECKED_CAST")
+		val payload = result as? Map<String, Any?>
+		val ok = payload?.get("ok") as? Boolean ?: false
+		if (!ok) {
+			val error = payload?.get("error") as? String ?: "Translation failed"
+			Handler(Looper.getMainLooper()).post {
+				showResultOverlay(
+					title = "Translation Error",
+					message = error,
+					showRetry = true,
+				)
+			}
+			return
+		}
+
+		val translatedText = (payload["translatedText"] as? String).orEmpty().ifEmpty { "(empty)" }
+		Handler(Looper.getMainLooper()).post {
+			showResultOverlay(
+				title = "Translation Result",
+				message = translatedText,
+				showRetry = false,
+			)
+		}
+	}
+
+	private fun readClipboardText(): String? {
+		val clipboardManager = getSystemService(CLIPBOARD_SERVICE) as? ClipboardManager ?: return null
+		val primaryClip: ClipData = clipboardManager.primaryClip ?: return null
+		if (primaryClip.itemCount == 0) {
+			return null
+		}
+
+		val text = primaryClip.getItemAt(0).coerceToText(applicationContext)?.toString()?.trim()
+		return text?.takeIf { it.isNotEmpty() }
 	}
 
 	private fun buildNotification(): Notification {
@@ -250,6 +371,8 @@ class FloatingBubbleService : Service() {
 	}
 
 	companion object {
+		private const val BACKGROUND_CHANNEL_NAME = "modeltranslation/background_translate"
+		private const val BACKGROUND_DART_ENTRYPOINT = "backgroundMain"
 		const val ACTION_START = "modeltranslation.action.START_FLOATING_BUBBLE"
 		const val ACTION_STOP = "modeltranslation.action.STOP_FLOATING_BUBBLE"
 		const val ACTION_SHOW_RESULT = "modeltranslation.action.SHOW_RESULT_OVERLAY"
@@ -260,6 +383,7 @@ class FloatingBubbleService : Service() {
 		const val EXTRA_RESULT_MESSAGE = "extra_result_message"
 		const val EXTRA_SHOW_RETRY = "extra_show_retry"
 		const val EXTRA_DIAGNOSTICS_ENABLED = "extra_diagnostics_enabled"
+		const val EXTRA_FROM_FLOATING_BUBBLE = "extra_from_floating_bubble"
 		private const val CHANNEL_ID = "modeltranslation.floating_bubble"
 		private const val NOTIFICATION_ID = 1001
 

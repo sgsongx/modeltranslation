@@ -49,6 +49,16 @@ class MainActivity : FlutterActivity() {
 				"source" to "floating_bubble",
 				"clipboardText" to clipboardText,
 			)
+
+			// Keep UI invisible for bubble-triggered translation.
+			val fromFloatingBubble = intent.getBooleanExtra(FloatingBubbleService.EXTRA_FROM_FLOATING_BUBBLE, false)
+			if (fromFloatingBubble) {
+				android.os.Handler(android.os.Looper.getMainLooper()).post {
+					moveTaskToBack(true)
+					trace("moved to background after floating bubble launch")
+				}
+			}
+
 			consumePendingAction()
 		}
 	}
