@@ -44,19 +44,19 @@ class MainActivity : FlutterActivity() {
 		val actionId = intent?.getStringExtra(FloatingBubbleService.EXTRA_ACTION_ID)
 		if (actionId != null) {
 			val clipboardText = readClipboardText()
+			trace("bridge.clipboard.prefetch actionId=$actionId length=${clipboardText?.length ?: 0}")
 			pendingActionId = actionId
 			pendingPayload = mapOf(
 				"source" to "floating_bubble",
 				"clipboardText" to clipboardText,
 			)
 
-			// Keep UI invisible for bubble-triggered translation.
 			val fromFloatingBubble = intent.getBooleanExtra(FloatingBubbleService.EXTRA_FROM_FLOATING_BUBBLE, false)
 			if (fromFloatingBubble) {
-				android.os.Handler(android.os.Looper.getMainLooper()).post {
+				android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
 					moveTaskToBack(true)
 					trace("moved to background after floating bubble launch")
-				}
+				}, 100)
 			}
 
 			consumePendingAction()

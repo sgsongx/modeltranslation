@@ -33,14 +33,10 @@ import 'infrastructure/platform_bridge_gateways.dart';
 import 'infrastructure/shared_prefs_llm_config_repository.dart';
 import 'infrastructure/shared_prefs_secret_vault.dart';
 import 'infrastructure/vault_api_key_provider.dart';
-import 'background_translation_entrypoint.dart' as background_entrypoint;
 
 void main() {
   runApp(ModelTranslationApp(enableHttpLlmGateway: true));
 }
-
-@pragma('vm:entry-point')
-Future<void> backgroundMain() => background_entrypoint.backgroundMain();
 
 DebugTraceLogger _diagnosticsLogger(bool enabled) {
   return enabled ? DebugTraceLogger.enabled() : DebugTraceLogger.disabled();
