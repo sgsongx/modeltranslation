@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:modeltranslation/core/application/translation_history_use_case.dart';
 import 'package:modeltranslation/core/application/translation_history_use_case_impl.dart';
 import 'package:modeltranslation/core/domain/gateways/record_repository.dart';
 import 'package:modeltranslation/core/domain/translation_record.dart';

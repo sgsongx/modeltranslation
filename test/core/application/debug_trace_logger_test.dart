@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:modeltranslation/core/application/use_case_result.dart';
 import 'package:modeltranslation/core/domain/gateways/clipboard_gateway.dart';
 import 'package:modeltranslation/core/domain/gateways/llm_config_repository.dart';
 import 'package:modeltranslation/core/domain/gateways/llm_gateway.dart';
@@ -9,8 +8,6 @@ import 'package:modeltranslation/core/domain/llm_config.dart';
 import 'package:modeltranslation/core/domain/translation_record.dart';
 import 'package:modeltranslation/core/domain/translation_request.dart';
 import 'package:modeltranslation/infrastructure/debug_trace_logger.dart';
-import 'package:modeltranslation/infrastructure/debug_translate_clipboard_gateway.dart';
-import 'package:modeltranslation/infrastructure/debug_llm_gateway.dart';
 
 class FakeLogger implements DebugTraceLogger {
   final List<String> entries = <String>[];

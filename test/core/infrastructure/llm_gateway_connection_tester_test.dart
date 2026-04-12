@@ -51,6 +51,7 @@ void main() {
     final result = await tester.test(_config());
 
     expect(result.isSuccess, isFalse);
-    expect(result.errorMessage, 'Connection failed.');
+    expect(result.errorMessage, contains('Connection failed:'));
+    expect(result.errorMessage, contains('network down'));
   });
 }

@@ -11,6 +11,7 @@ import 'package:modeltranslation/core/domain/gateways/platform_bridge_gateway.da
 import 'package:modeltranslation/core/domain/gateways/llm_config_repository.dart';
 import 'package:modeltranslation/core/domain/llm_config.dart';
 import 'package:modeltranslation/main.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   final StreamController<BridgeEvent> _eventController = StreamController<BridgeEvent>.broadcast();
@@ -79,6 +80,29 @@ class FakeLlmConnectionTester implements LlmConnectionTester {
   }
 }
 
+class ApiKeyRequiredLlmConnectionTester implements LlmConnectionTester {
+  @override
+  Future<ConnectionTestResult> test(LlmConfig config) async {
+    final hasApiKeyRef = config.apiKeyRef != null && config.apiKeyRef!.trim().isNotEmpty;
+    if (!hasApiKeyRef) {
+      return ConnectionTestResult.failure(
+        provider: config.provider,
+        model: config.model,
+        endpoint: config.baseUrl,
+        errorMessage: 'Connection failed: API key is missing.',
+      );
+    }
+
+    return ConnectionTestResult.success(
+      provider: config.provider,
+      model: config.model,
+      endpoint: config.baseUrl,
+      latencyMs: 98,
+      message: 'Connection verified.',
+    );
+  }
+}
+
 class FakeApiKeySecurityUseCase implements ApiKeySecurityUseCase {
   int storeCalls = 0;
   String? lastApiKey;
@@ -104,6 +128,10 @@ class FakeApiKeySecurityUseCase implements ApiKeySecurityUseCase {
 }
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
+
   testWidgets('Settings form saves the config through the repository', (WidgetTester tester) async {
     final platformGateway = FakePlatformBridgeGateway();
     final configRepository = FakeLlmConfigRepository();
@@ -139,6 +167,8 @@ void main() {
 
     await tester.drag(find.byType(ListView).last, const Offset(0, -700));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Save configuration'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Save configuration'));
     await tester.pumpAndSettle();
 
@@ -173,8 +203,11 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField, 'Max Tokens'), '1024');
     await tester.enterText(find.widgetWithText(TextFormField, 'Timeout (ms)'), '15000');
     await tester.enterText(find.widgetWithText(TextFormField, 'System Prompt'), 'Translate with a concise style.');
+    await tester.enterText(find.widgetWithText(TextFormField, 'API Key'), 'secret-api-key');
 
     await tester.drag(find.byType(ListView).last, const Offset(0, -700));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Test connection'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Test connection'));
     await tester.pumpAndSettle();
@@ -221,5 +254,44 @@ void main() {
     expect(apiKeyUseCase.storeCalls, 1);
     expect(apiKeyUseCase.lastApiKey, 'secret-api-key');
     expect(configRepository.activeConfig?.apiKeyRef, 'vault-ref-1');
+  });
+
+  testWidgets('Test connection resolves API key from input before save', (WidgetTester tester) async {
+    final platformGateway = FakePlatformBridgeGateway();
+    final configRepository = FakeLlmConfigRepository();
+    final apiKeyUseCase = FakeApiKeySecurityUseCase();
+
+    await tester.pumpWidget(
+      ModelTranslationApp(
+        platformBridgeGateway: platformGateway,
+        translationHistoryUseCase: null,
+        llmConfigRepository: configRepository,
+        apiKeySecurityUseCase: apiKeyUseCase,
+        llmConnectionTester: ApiKeyRequiredLlmConnectionTester(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.widgetWithText(TextFormField, 'Base URL'), 'https://api.example.com/v1');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Model'), 'gpt-4o-mini');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Temperature'), '0.2');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Top P'), '0.9');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Max Tokens'), '1024');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Timeout (ms)'), '15000');
+    await tester.enterText(find.widgetWithText(TextFormField, 'System Prompt'), 'Translate with a concise style.');
+    await tester.enterText(find.widgetWithText(TextFormField, 'API Key'), 'temporary-api-key');
+
+    await tester.drag(find.byType(ListView).last, const Offset(0, -700));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Test connection'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Test connection'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Connection verified.'), findsOneWidget);
+    expect(apiKeyUseCase.storeCalls, 1);
   });
 }

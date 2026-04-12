@@ -1,8 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:modeltranslation/core/application/translate_clipboard_use_case.dart';
 import 'package:modeltranslation/core/application/translate_clipboard_use_case_impl.dart';
-import 'package:modeltranslation/core/application/use_case_result.dart';
-import 'package:modeltranslation/core/domain/config/connection_test_result.dart';
 import 'package:modeltranslation/core/domain/gateways/clipboard_gateway.dart';
 import 'package:modeltranslation/core/domain/gateways/llm_config_repository.dart';
 import 'package:modeltranslation/core/domain/gateways/llm_gateway.dart';

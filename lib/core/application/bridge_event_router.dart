@@ -39,6 +39,7 @@ class BridgeEventRouter implements BridgeEventProcessor {
 
   final ActionRegistry _actionRegistry;
 
+  @override
   Future<BridgeRouteResult> route(BridgeEvent event) async {
     if (event.kind != BridgeEventKind.action) {
       return const BridgeRouteResult.ignored('event_ignored');

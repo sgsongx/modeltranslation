@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:modeltranslation/core/domain/action_event.dart';
 import 'package:modeltranslation/core/domain/gateways/clipboard_gateway.dart';
 import 'package:modeltranslation/core/domain/gateways/llm_gateway.dart';
 import 'package:modeltranslation/core/domain/gateways/overlay_gateway.dart';

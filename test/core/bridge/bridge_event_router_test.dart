@@ -4,7 +4,6 @@ import 'package:modeltranslation/core/application/bridge_event_router.dart';
 import 'package:modeltranslation/core/bridge/bridge_event.dart';
 import 'package:modeltranslation/core/domain/actions/action_definition.dart';
 import 'package:modeltranslation/core/domain/actions/action_execution_result.dart';
-import 'package:modeltranslation/core/domain/actions/action_invocation_context.dart';
 import 'package:modeltranslation/core/domain/actions/action_trigger_type.dart';
 
 void main() {

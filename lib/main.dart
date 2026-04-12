@@ -30,6 +30,8 @@ import 'infrastructure/llm_gateway_connection_tester.dart';
 import 'infrastructure/mock_llm_gateway.dart';
 import 'infrastructure/mock_llm_connection_tester.dart';
 import 'infrastructure/platform_bridge_gateways.dart';
+import 'infrastructure/shared_prefs_llm_config_repository.dart';
+import 'infrastructure/shared_prefs_secret_vault.dart';
 import 'infrastructure/vault_api_key_provider.dart';
 
 void main() {
@@ -41,7 +43,7 @@ DebugTraceLogger _diagnosticsLogger(bool enabled) {
 }
 
 class ModelTranslationApp extends StatelessWidget {
-  static final InMemoryLlmConfigRepository _defaultConfigRepository = InMemoryLlmConfigRepository(
+  static final SharedPrefsLlmConfigRepository _defaultConfigRepository = SharedPrefsLlmConfigRepository(
     initialConfig: LlmConfig(
       id: 'default-active-config',
       provider: 'openai-compatible',
@@ -57,6 +59,7 @@ class ModelTranslationApp extends StatelessWidget {
     ),
   );
   static final InMemoryRecordRepository _defaultRecordRepository = InMemoryRecordRepository();
+  static final SharedPrefsSecretVault _defaultSecretVault = SharedPrefsSecretVault();
 
   ModelTranslationApp({
     super.key,
@@ -73,12 +76,12 @@ class ModelTranslationApp extends StatelessWidget {
     LlmConnectionTester? llmConnectionTester,
   })  : platformBridgeGateway = platformBridgeGateway ?? _DefaultPlatformBridgeGateway(),
         llmConfigRepository = llmConfigRepository ?? _defaultConfigRepository,
-        secretVault = secretVault ?? InMemorySecretVault(),
+        secretVault = secretVault ?? _defaultSecretVault,
       enableDiagnosticsLogging = enableDiagnosticsLogging,
         llmGateway = llmGateway ??
             (enableHttpLlmGateway
                 ? HttpLlmGateway(
-                    apiKeyProvider: VaultApiKeyProvider(secretVault ?? InMemorySecretVault()).resolve,
+                    apiKeyProvider: VaultApiKeyProvider(secretVault ?? _defaultSecretVault).resolve,
                   )
                 : MockLlmGateway()),
         translateClipboardUseCase = translateClipboardUseCase ??
@@ -88,7 +91,7 @@ class ModelTranslationApp extends StatelessWidget {
               llmGateway: llmGateway ??
                   (enableHttpLlmGateway
                       ? HttpLlmGateway(
-                          apiKeyProvider: VaultApiKeyProvider(secretVault ?? InMemorySecretVault()).resolve,
+                          apiKeyProvider: VaultApiKeyProvider(secretVault ?? _defaultSecretVault).resolve,
                         )
                       : MockLlmGateway()),
               overlayGateway: PlatformOverlayGateway(platformBridgeGateway ?? _DefaultPlatformBridgeGateway()),
@@ -109,7 +112,7 @@ class ModelTranslationApp extends StatelessWidget {
                     llmGateway: llmGateway ??
                       (enableHttpLlmGateway
                         ? HttpLlmGateway(
-                          apiKeyProvider: VaultApiKeyProvider(secretVault ?? InMemorySecretVault()).resolve,
+                          apiKeyProvider: VaultApiKeyProvider(secretVault ?? _defaultSecretVault).resolve,
                           )
                         : MockLlmGateway()),
                     overlayGateway:
@@ -124,7 +127,7 @@ class ModelTranslationApp extends StatelessWidget {
             ),
         apiKeySecurityUseCase = apiKeySecurityUseCase ??
             ApiKeySecurityUseCaseImpl(
-              vault: secretVault ?? InMemorySecretVault(),
+              vault: secretVault ?? _defaultSecretVault,
               keyRefProvider: () => 'active-api-key',
             ),
         translationHistoryUseCase = translationHistoryUseCase ??
@@ -134,8 +137,9 @@ class ModelTranslationApp extends StatelessWidget {
                 ? LlmGatewayConnectionTester(
                     llmGateway: llmGateway ??
                         HttpLlmGateway(
-                          apiKeyProvider: VaultApiKeyProvider(secretVault ?? InMemorySecretVault()).resolve,
+                          apiKeyProvider: VaultApiKeyProvider(secretVault ?? _defaultSecretVault).resolve,
                         ),
+                    debugLogger: _diagnosticsLogger(enableDiagnosticsLogging),
                   )
                 : MockLlmConnectionTester());
 
@@ -727,11 +731,53 @@ class _SettingsSectionState extends State<_SettingsSection> {
       return;
     }
 
+    var resolvedApiKeyRef = _apiKeyRef;
+    final rawApiKey = _apiKeyController.text.trim();
+    if (rawApiKey.isNotEmpty) {
+      final apiKeySecurityUseCase = widget.apiKeySecurityUseCase;
+      if (apiKeySecurityUseCase == null) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          statusMessage = 'Connection failed: API key storage unavailable.';
+        });
+        return;
+      }
+
+      final storeResult = await apiKeySecurityUseCase.store(
+        rawApiKey,
+        keyRef: resolvedApiKeyRef ?? 'active-api-key',
+      );
+      if (!storeResult.isSuccess || storeResult.value == null) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          statusMessage = storeResult.failure?.message ?? 'Connection failed: unable to store API key.';
+        });
+        return;
+      }
+
+      resolvedApiKeyRef = storeResult.value;
+      _apiKeyRef = resolvedApiKeyRef;
+    }
+
+    if (resolvedApiKeyRef == null || resolvedApiKeyRef.trim().isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        statusMessage = 'Connection failed: API key is missing.';
+      });
+      return;
+    }
+
     final config = LlmConfig(
       id: 'active-config',
       provider: 'openai-compatible',
       baseUrl: _baseUrlController.text.trim(),
-      apiKeyRef: _apiKeyRef,
+      apiKeyRef: resolvedApiKeyRef,
       model: _modelController.text.trim(),
       temperature: double.parse(_temperatureController.text.trim()),
       topP: double.parse(_topPController.text.trim()),

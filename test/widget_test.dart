@@ -18,6 +18,7 @@ import 'package:modeltranslation/infrastructure/in_memory_secret_vault.dart';
 import 'package:modeltranslation/infrastructure/platform_bridge_gateways.dart';
 import 'package:modeltranslation/infrastructure/vault_api_key_provider.dart';
 import 'package:modeltranslation/main.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   final StreamController<BridgeEvent> _eventController = StreamController<BridgeEvent>.broadcast();
@@ -166,6 +167,10 @@ class FakeDioHttpClient implements DioHttpClient {
 }
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
+
   testWidgets('ModelTranslation app exposes bubble controls', (WidgetTester tester) async {
     final gateway = FakePlatformBridgeGateway();
 
