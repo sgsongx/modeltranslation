@@ -15,7 +15,11 @@ ActionRegistry buildDefaultActionRegistry({
       triggerType: ActionTriggerType.click,
       enabled: true,
       execute: (ActionInvocationContext context) async {
-        final result = await translateClipboardUseCase.execute();
+        final payloadText = context.payload['clipboardText'];
+        final sourceTextOverride = payloadText is String ? payloadText : null;
+        final result = await translateClipboardUseCase.execute(
+          sourceTextOverride: sourceTextOverride,
+        );
         if (!result.isSuccess || result.value == null) {
           final failure = result.failure;
           return ActionExecutionResult.failure(

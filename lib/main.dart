@@ -256,9 +256,7 @@ class _TranslationShellState extends State<TranslationShell> {
     }
 
     final source = event.payload['source'] as String?;
-    if (source == 'floating_bubble') {
-      await widget.platformBridgeGateway.moveAppToBackground();
-    }
+    final shouldMoveToBackground = source == 'floating_bubble';
 
     if (event.payload['translatedText'] == null && event.payload['errorMessage'] == null) {
       final actionRegistry = widget.actionRegistry;
@@ -273,6 +271,10 @@ class _TranslationShellState extends State<TranslationShell> {
         );
 
         if (!executionResult.isSuccess) {
+          if (shouldMoveToBackground) {
+            await widget.platformBridgeGateway.moveAppToBackground();
+          }
+
           if (!mounted) {
             return;
           }
@@ -281,6 +283,14 @@ class _TranslationShellState extends State<TranslationShell> {
             statusMessage = 'Translation error overlay shown from bubble action';
           });
           return;
+        }
+
+        if (!mounted) {
+          return;
+        }
+
+        if (shouldMoveToBackground) {
+          await widget.platformBridgeGateway.moveAppToBackground();
         }
 
         if (!mounted) {
@@ -296,6 +306,10 @@ class _TranslationShellState extends State<TranslationShell> {
 
     final errorMessage = (event.payload['errorMessage'] as String?)?.trim();
     if (errorMessage != null && errorMessage.isNotEmpty) {
+      if (shouldMoveToBackground) {
+        await widget.platformBridgeGateway.moveAppToBackground();
+      }
+
       await widget.platformBridgeGateway.showOverlay(
         title: 'Translation Error',
         message: errorMessage,
@@ -319,6 +333,10 @@ class _TranslationShellState extends State<TranslationShell> {
 
     if (message == null || message.isEmpty) {
       message = 'Clipboard is empty';
+    }
+
+    if (shouldMoveToBackground) {
+      await widget.platformBridgeGateway.moveAppToBackground();
     }
 
     await widget.platformBridgeGateway.showOverlay(

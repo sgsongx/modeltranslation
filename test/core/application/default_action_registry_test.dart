@@ -6,8 +6,11 @@ import 'package:modeltranslation/core/domain/actions/action_invocation_context.d
 import 'package:modeltranslation/core/domain/translation_record.dart';
 
 class FakeTranslateClipboardUseCase implements TranslateClipboardUseCase {
+  String? lastSourceTextOverride;
+
   @override
-  Future<UseCaseResult<TranslationRecord>> execute() async {
+  Future<UseCaseResult<TranslationRecord>> execute({String? sourceTextOverride}) async {
+    lastSourceTextOverride = sourceTextOverride;
     return UseCaseResult.success(
       TranslationRecord(
         id: 'record-1',
@@ -51,5 +54,23 @@ void main() {
 
     expect(registry.resolve('summarize_clipboard'), isNull);
     expect(registry.resolve('rewrite_clipboard'), isNull);
+  });
+
+  test('Default action registry forwards clipboardText payload to use case', () async {
+    final useCase = FakeTranslateClipboardUseCase();
+    final registry = buildDefaultActionRegistry(
+      translateClipboardUseCase: useCase,
+    );
+
+    await registry.execute(
+      'translate_clipboard',
+      context: ActionInvocationContext(
+        actionId: 'translate_clipboard',
+        payload: const <String, Object?>{'clipboardText': 'from-event-payload'},
+        createdAt: DateTime(2026, 4, 11),
+      ),
+    );
+
+    expect(useCase.lastSourceTextOverride, 'from-event-payload');
   });
 }

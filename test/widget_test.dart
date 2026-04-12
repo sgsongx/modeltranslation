@@ -34,6 +34,9 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   String? lastOverlayMessage;
   String? clipboardText;
   bool hasOverlayPermission = true;
+  bool clipboardRestrictedWhenBackgrounded = false;
+  bool _isBackgrounded = false;
+  final List<String> operationLog = <String>[];
 
   void emitActionEvent(String actionId, {Map<String, Object?> payload = const <String, Object?>{}}) {
     _eventController.add(
@@ -46,7 +49,13 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   }
 
   @override
-  Future<String?> getClipboardText() async => clipboardText;
+  Future<String?> getClipboardText() async {
+    operationLog.add('readClipboard');
+    if (clipboardRestrictedWhenBackgrounded && _isBackgrounded) {
+      return null;
+    }
+    return clipboardText;
+  }
 
   @override
   Future<bool> hasOverlayPermissionGranted() async => hasOverlayPermission;
@@ -80,6 +89,7 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
 
   @override
   Future<void> showOverlay({required String title, required String message}) async {
+    operationLog.add('showOverlay');
     showOverlayCalls++;
     lastOverlayTitle = title;
     lastOverlayMessage = message;
@@ -97,6 +107,8 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
 
   @override
   Future<void> moveAppToBackground() async {
+    operationLog.add('moveBackground');
+    _isBackgrounded = true;
     moveToBackgroundCalls++;
   }
 
@@ -289,6 +301,27 @@ void main() {
 
     expect(gateway.moveToBackgroundCalls, 1);
     expect(gateway.showOverlayCalls, 1);
+  });
+
+  testWidgets('ModelTranslation app reads clipboard before moving to background for bubble action',
+      (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway()
+      ..clipboardText = 'Hello from clipboard'
+      ..clipboardRestrictedWhenBackgrounded = true;
+
+    await tester.pumpWidget(ModelTranslationApp(platformBridgeGateway: gateway));
+    await tester.pumpAndSettle();
+
+    gateway.emitActionEvent('translate_clipboard', payload: <String, Object?>{'source': 'floating_bubble'});
+    await tester.pumpAndSettle();
+
+    expect(gateway.showOverlayCalls, 1);
+    expect(gateway.moveToBackgroundCalls, 1);
+    final readIndex = gateway.operationLog.indexOf('readClipboard');
+    final moveIndex = gateway.operationLog.indexOf('moveBackground');
+    expect(readIndex, isNonNegative);
+    expect(moveIndex, isNonNegative);
+    expect(readIndex, lessThan(moveIndex));
   });
 
   testWidgets('ModelTranslation app prefers translatedText from action payload', (WidgetTester tester) async {

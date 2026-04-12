@@ -43,12 +43,26 @@ class MainActivity : FlutterActivity() {
 	private fun consumeIntent(intent: Intent?) {
 		val actionId = intent?.getStringExtra(FloatingBubbleService.EXTRA_ACTION_ID)
 		if (actionId != null) {
+			val clipboardText = readClipboardText()
 			pendingActionId = actionId
 			pendingPayload = mapOf(
 				"source" to "floating_bubble",
+				"clipboardText" to clipboardText,
 			)
 			consumePendingAction()
 		}
+	}
+
+	private fun readClipboardText(): String? {
+		val clipboardManager = applicationContext.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+			?: return null
+		val primaryClip: ClipData = clipboardManager.primaryClip ?: return null
+		if (primaryClip.itemCount == 0) {
+			return null
+		}
+
+		val text = primaryClip.getItemAt(0).coerceToText(applicationContext)?.toString()?.trim()
+		return text?.takeIf { it.isNotEmpty() }
 	}
 
 	private fun consumePendingAction() {

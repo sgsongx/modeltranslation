@@ -45,11 +45,17 @@ class TranslateClipboardUseCaseImpl implements TranslateClipboardUseCase {
   final DebugTraceLogger _debugLogger;
 
   @override
-  Future<UseCaseResult<TranslationRecord>> execute() async {
+  Future<UseCaseResult<TranslationRecord>> execute({String? sourceTextOverride}) async {
     _trace('translation.execute:start target=$targetLang style=${stylePreset ?? 'none'}');
 
-    _trace('clipboard.read:start');
-    final clipboardText = (await _clipboardGateway.readText())?.trim();
+    var clipboardText = sourceTextOverride?.trim();
+    if (clipboardText == null || clipboardText.isEmpty) {
+      _trace('clipboard.read:start');
+      clipboardText = (await _clipboardGateway.readText())?.trim();
+    } else {
+      _trace('clipboard.read:from_override length=${clipboardText.length}');
+    }
+
     if (clipboardText == null || clipboardText.isEmpty) {
       _trace('clipboard.read:empty');
       const failure = UseCaseFailure(

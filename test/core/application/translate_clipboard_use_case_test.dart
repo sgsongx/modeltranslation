@@ -5,7 +5,7 @@ import 'package:modeltranslation/core/domain/translation_record.dart';
 
 class FakeTranslateClipboardUseCase implements TranslateClipboardUseCase {
   @override
-  Future<UseCaseResult<TranslationRecord>> execute() async {
+  Future<UseCaseResult<TranslationRecord>> execute({String? sourceTextOverride}) async {
     return UseCaseResult.success(
       TranslationRecord(
         id: 'record-1',
@@ -24,7 +24,7 @@ class FakeTranslateClipboardUseCase implements TranslateClipboardUseCase {
 
 class FailingTranslateClipboardUseCase implements TranslateClipboardUseCase {
   @override
-  Future<UseCaseResult<TranslationRecord>> execute() async {
+  Future<UseCaseResult<TranslationRecord>> execute({String? sourceTextOverride}) async {
     return UseCaseResult.failure(
       const UseCaseFailure(
         code: 'clipboard_empty',
