@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -202,6 +203,8 @@ class TranslationShell extends StatefulWidget {
 }
 
 class _TranslationShellState extends State<TranslationShell> {
+  static const int _historyOverlayLimit = 5000;
+
   String? clipboardText;
   String statusMessage = 'Ready';
   bool supportsFloatingBubble = false;
@@ -252,7 +255,16 @@ class _TranslationShellState extends State<TranslationShell> {
       statusMessage = 'Action event: ${event.actionId}';
     });
 
-    if (event.kind != BridgeEventKind.action || event.actionId != 'translate_clipboard') {
+    if (event.kind != BridgeEventKind.action) {
+      return;
+    }
+
+    if (event.actionId == 'open_recent_history') {
+      await _handleRecentHistoryAction(event);
+      return;
+    }
+
+    if (event.actionId != 'translate_clipboard') {
       return;
     }
 
@@ -352,6 +364,65 @@ class _TranslationShellState extends State<TranslationShell> {
     setState(() {
       statusMessage = 'Translation overlay shown from bubble action';
     });
+  }
+
+  Future<void> _handleRecentHistoryAction(BridgeEvent event) async {
+    final source = event.payload['source'] as String?;
+    final shouldMoveToBackground = source == 'floating_bubble';
+    final historyUseCase = widget.translationHistoryUseCase;
+
+    String message;
+    if (historyUseCase == null) {
+      message = 'History source is not connected.';
+    } else {
+      final result = await historyUseCase.loadRecent(limit: _historyOverlayLimit);
+      if (!result.isSuccess || result.value == null) {
+        message = result.failure?.message ?? 'Failed to load recent history.';
+      } else if (result.value!.isEmpty) {
+        message = 'No translation history yet. Tap the bubble once to translate first.';
+      } else {
+        message = _buildRecentHistoryOverlayPayload(result.value!);
+      }
+    }
+
+    if (shouldMoveToBackground) {
+      await widget.platformBridgeGateway.moveAppToBackground();
+    }
+
+    await widget.platformBridgeGateway.showOverlay(
+      title: 'Recent History',
+      message: message,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      statusMessage = 'Recent history overlay shown from bubble action';
+    });
+  }
+
+  String _buildRecentHistoryOverlayPayload(List<TranslationRecord> records) {
+    final payload = <String, Object?>{
+      'type': 'recent_history_v1',
+      'interaction': <String, Object?>{
+        'tap': 'copy_translated',
+        'longPress': 'copy_source',
+      },
+      'entries': records
+          .map(
+            (record) => <String, Object?>{
+              'id': record.id,
+              'sourceText': record.sourceText,
+              'translatedText': record.translatedText,
+              'createdAt': record.createdAt.toIso8601String(),
+              'status': record.status.name,
+            },
+          )
+          .toList(growable: false),
+    };
+    return jsonEncode(payload);
   }
 
   Future<void> _startBubble() async {

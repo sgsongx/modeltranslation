@@ -19,8 +19,11 @@ import android.util.Log
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import org.json.JSONObject
 
 class FloatingBubbleService : Service() {
 	private lateinit var windowManager: WindowManager
@@ -94,7 +97,11 @@ class FloatingBubbleService : Service() {
 				}
 			)
 			setOnClickListener {
-				launchTranslationAction()
+				launchAction(ACTION_TRANSLATE_CLIPBOARD)
+			}
+			setOnLongClickListener {
+				launchAction(ACTION_OPEN_RECENT_HISTORY)
+				true
 			}
 		}
 
@@ -129,6 +136,7 @@ class FloatingBubbleService : Service() {
 	private fun showResultOverlay(title: String, message: String, showRetry: Boolean) {
 		trace("service.overlay.show title=$title messageLength=${message.length} showRetry=$showRetry")
 		hideResultOverlay()
+		val recentHistory = if (title == "Recent History") parseRecentHistoryPayload(message) else null
 
 		val container = LinearLayout(this).apply {
 			orientation = LinearLayout.VERTICAL
@@ -140,13 +148,17 @@ class FloatingBubbleService : Service() {
 					textSize = 18f
 				}
 			)
-			addView(
-				TextView(context).apply {
-					text = message.ifEmpty { "(empty)" }
-					textSize = 15f
-					setPadding(0, 16, 0, 16)
-				}
-			)
+			if (recentHistory == null) {
+				addView(
+					TextView(context).apply {
+						text = message.ifEmpty { "(empty)" }
+						textSize = 15f
+						setPadding(0, 16, 0, 16)
+					}
+				)
+			} else {
+				addView(buildRecentHistoryContent(recentHistory))
+			}
 
 			val actionRow = LinearLayout(context).apply {
 				orientation = LinearLayout.HORIZONTAL
@@ -157,7 +169,7 @@ class FloatingBubbleService : Service() {
 							text = "Retry"
 							setOnClickListener {
 								hideResultOverlay()
-								launchTranslationAction()
+								launchAction(ACTION_TRANSLATE_CLIPBOARD)
 							}
 						}
 					)
@@ -203,23 +215,96 @@ class FloatingBubbleService : Service() {
 		resultOverlayView = container
 	}
 
+	private fun buildRecentHistoryContent(payload: RecentHistoryPayload): View {
+		if (payload.entries.isEmpty()) {
+			return TextView(this).apply {
+				text = payload.emptyHint.ifEmpty { "No translation history yet. Tap the bubble once to translate first." }
+				textSize = 15f
+				setPadding(0, 16, 0, 16)
+			}
+		}
+
+		val listContainer = LinearLayout(this).apply {
+			orientation = LinearLayout.VERTICAL
+		}
+
+		payload.entries.forEachIndexed { index, entry ->
+			val row = TextView(this).apply {
+				text = "${index + 1}. ${entry.sourceText}\n→ ${entry.translatedText}\n${entry.createdAt}  [${entry.status}]"
+				textSize = 14f
+				setPadding(0, 12, 0, 12)
+				setOnClickListener {
+					copyToClipboard(entry.translatedText, "history_translated")
+					showToast("Copied translation")
+				}
+				setOnLongClickListener {
+					copyToClipboard(entry.sourceText, "history_source")
+					showToast("Copied source text")
+					true
+				}
+			}
+			listContainer.addView(row)
+		}
+
+		return ScrollView(this).apply {
+			setPadding(0, 16, 0, 16)
+			addView(listContainer)
+		}
+	}
+
+	private fun parseRecentHistoryPayload(message: String): RecentHistoryPayload? {
+		return try {
+			val root = JSONObject(message)
+			if (root.optString("type") != "recent_history_v1") {
+				return null
+			}
+
+			val entriesJson = root.optJSONArray("entries")
+			val entries = mutableListOf<HistoryEntry>()
+			if (entriesJson != null) {
+				for (index in 0 until entriesJson.length()) {
+					val item = entriesJson.optJSONObject(index) ?: continue
+					entries.add(
+						HistoryEntry(
+							sourceText = item.optString("sourceText"),
+							translatedText = item.optString("translatedText"),
+							createdAt = item.optString("createdAt"),
+							status = item.optString("status", "unknown"),
+						)
+					)
+				}
+			}
+
+			RecentHistoryPayload(
+				entries = entries,
+				emptyHint = root.optString("emptyHint", ""),
+			)
+		} catch (_: Throwable) {
+			null
+		}
+	}
+
 	private fun hideResultOverlay() {
 		trace("service.overlay.hide")
 		resultOverlayView?.let { windowManager.removeView(it) }
 		resultOverlayView = null
 	}
 
-	private fun copyToClipboard(message: String) {
+	private fun copyToClipboard(message: String, label: String = "translation_result") {
 		trace("service.overlay.copy messageLength=${message.length}")
 		val clipboardManager = getSystemService(CLIPBOARD_SERVICE) as? ClipboardManager ?: return
-		clipboardManager.setPrimaryClip(ClipData.newPlainText("translation_result", message))
+		clipboardManager.setPrimaryClip(ClipData.newPlainText(label, message))
 	}
 
-	private fun launchTranslationAction() {
-		trace("service.overlay.launchTranslationAction")
+	private fun showToast(message: String) {
+		Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+	}
+
+	private fun launchAction(actionId: String) {
+		trace("service.overlay.launchAction actionId=$actionId")
 		val launchIntent = Intent(this, MainActivity::class.java).apply {
 			addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NO_ANIMATION)
-			putExtra(EXTRA_ACTION_ID, ACTION_TRANSLATE_CLIPBOARD)
+			putExtra(EXTRA_ACTION_ID, actionId)
 			putExtra(EXTRA_FROM_FLOATING_BUBBLE, true)
 		}
 		startActivity(launchIntent)
@@ -256,6 +341,7 @@ class FloatingBubbleService : Service() {
 		const val ACTION_SHOW_RESULT = "modeltranslation.action.SHOW_RESULT_OVERLAY"
 		const val ACTION_HIDE_RESULT = "modeltranslation.action.HIDE_RESULT_OVERLAY"
 		const val ACTION_TRANSLATE_CLIPBOARD = "translate_clipboard"
+		const val ACTION_OPEN_RECENT_HISTORY = "open_recent_history"
 		const val EXTRA_ACTION_ID = "extra_action_id"
 		const val EXTRA_RESULT_TITLE = "extra_result_title"
 		const val EXTRA_RESULT_MESSAGE = "extra_result_message"
@@ -339,4 +425,16 @@ class FloatingBubbleService : Service() {
 			Log.d("FloatingBubbleService", message)
 		}
 	}
+
+	private data class HistoryEntry(
+		val sourceText: String,
+		val translatedText: String,
+		val createdAt: String,
+		val status: String,
+	)
+
+	private data class RecentHistoryPayload(
+		val entries: List<HistoryEntry>,
+		val emptyHint: String,
+	)
 }

@@ -52,13 +52,17 @@ class MainActivity : FlutterActivity() {
 	private fun consumeIntent(intent: Intent?) {
 		val actionId = intent?.getStringExtra(FloatingBubbleService.EXTRA_ACTION_ID)
 		if (actionId != null) {
-			val clipboardText = readClipboardText()
-			trace("bridge.clipboard.prefetch actionId=$actionId length=${clipboardText?.length ?: 0}")
-			pendingActionId = actionId
-			pendingPayload = mapOf(
+			val payload = mutableMapOf<String, Any?>(
 				"source" to "floating_bubble",
-				"clipboardText" to clipboardText,
 			)
+			if (actionId == FloatingBubbleService.ACTION_TRANSLATE_CLIPBOARD) {
+				val clipboardText = readClipboardText()
+				trace("bridge.clipboard.prefetch actionId=$actionId length=${clipboardText?.length ?: 0}")
+				payload["clipboardText"] = clipboardText
+			}
+
+			pendingActionId = actionId
+			pendingPayload = payload
 
 			val fromFloatingBubble = intent.getBooleanExtra(FloatingBubbleService.EXTRA_FROM_FLOATING_BUBBLE, false)
 			if (fromFloatingBubble) {

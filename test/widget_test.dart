@@ -365,6 +365,101 @@ void main() {
     expect(gateway.lastOverlayMessage, 'Network timeout');
   });
 
+  testWidgets('ModelTranslation app shows recent history overlay for open_recent_history action',
+      (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway();
+    final historyUseCase = FakeHistoryUseCase(
+      [
+        TranslationRecord(
+          id: 'record-1',
+          sourceText: 'How are you today?',
+          translatedText: '你今天怎么样？',
+          provider: 'openai-compatible',
+          model: 'gpt-4o-mini',
+          paramsJson: '{"temperature":0.2}',
+          status: TranslationStatus.success,
+          errorMessage: null,
+          createdAt: DateTime(2026, 4, 12, 9, 30),
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      ModelTranslationApp(
+        platformBridgeGateway: gateway,
+        translationHistoryUseCase: historyUseCase,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    gateway.emitActionEvent('open_recent_history', payload: <String, Object?>{'source': 'floating_bubble'});
+    await tester.pumpAndSettle();
+
+    expect(gateway.moveToBackgroundCalls, 1);
+    expect(gateway.showOverlayCalls, 1);
+    expect(gateway.lastOverlayTitle, 'Recent History');
+    expect(gateway.lastOverlayMessage, contains('"type":"recent_history_v1"'));
+    expect(gateway.lastOverlayMessage, contains('"sourceText":"How are you today?"'));
+    expect(gateway.lastOverlayMessage, contains('"translatedText"'));
+  });
+
+  testWidgets('ModelTranslation app recent history overlay payload includes more than three records',
+      (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway();
+    final historyUseCase = FakeHistoryUseCase(
+      List<TranslationRecord>.generate(
+        4,
+        (index) => TranslationRecord(
+          id: 'record-$index',
+          sourceText: 'source-$index',
+          translatedText: 'translated-$index',
+          provider: 'openai-compatible',
+          model: 'gpt-4o-mini',
+          paramsJson: '{"temperature":0.2}',
+          status: TranslationStatus.success,
+          errorMessage: null,
+          createdAt: DateTime(2026, 4, 12, 9, index),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ModelTranslationApp(
+        platformBridgeGateway: gateway,
+        translationHistoryUseCase: historyUseCase,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    gateway.emitActionEvent('open_recent_history', payload: <String, Object?>{'source': 'floating_bubble'});
+    await tester.pumpAndSettle();
+
+    expect(gateway.showOverlayCalls, 1);
+    expect(gateway.lastOverlayTitle, 'Recent History');
+    expect(gateway.lastOverlayMessage, contains('translated-3'));
+  });
+
+  testWidgets('ModelTranslation app shows empty hint for open_recent_history action when no records',
+      (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway();
+    final historyUseCase = FakeHistoryUseCase(const <TranslationRecord>[]);
+
+    await tester.pumpWidget(
+      ModelTranslationApp(
+        platformBridgeGateway: gateway,
+        translationHistoryUseCase: historyUseCase,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    gateway.emitActionEvent('open_recent_history', payload: <String, Object?>{'source': 'floating_bubble'});
+    await tester.pumpAndSettle();
+
+    expect(gateway.showOverlayCalls, 1);
+    expect(gateway.lastOverlayTitle, 'Recent History');
+    expect(gateway.lastOverlayMessage, contains('No translation history yet'));
+  });
+
   testWidgets('ModelTranslation app shows API key missing error when action triggers without key',
       (WidgetTester tester) async {
     final gateway = FakePlatformBridgeGateway()
