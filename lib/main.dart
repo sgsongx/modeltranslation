@@ -31,6 +31,7 @@ import 'infrastructure/mock_llm_gateway.dart';
 import 'infrastructure/mock_llm_connection_tester.dart';
 import 'infrastructure/platform_bridge_gateways.dart';
 import 'infrastructure/shared_prefs_llm_config_repository.dart';
+import 'infrastructure/shared_prefs_record_repository.dart';
 import 'infrastructure/shared_prefs_secret_vault.dart';
 import 'infrastructure/vault_api_key_provider.dart';
 
@@ -58,7 +59,7 @@ class ModelTranslationApp extends StatelessWidget {
       updatedAt: DateTime(2026, 4, 11),
     ),
   );
-  static final InMemoryRecordRepository _defaultRecordRepository = InMemoryRecordRepository();
+  static final SharedPrefsRecordRepository _defaultRecordRepository = SharedPrefsRecordRepository();
   static final SharedPrefsSecretVault _defaultSecretVault = SharedPrefsSecretVault();
 
   ModelTranslationApp({

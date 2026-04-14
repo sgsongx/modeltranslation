@@ -4,6 +4,8 @@ import 'package:modeltranslation/core/domain/translation_record.dart';
 import 'package:modeltranslation/infrastructure/in_memory_llm_config_repository.dart';
 import 'package:modeltranslation/infrastructure/in_memory_record_repository.dart';
 import 'package:modeltranslation/infrastructure/mock_llm_connection_tester.dart';
+import 'package:modeltranslation/infrastructure/shared_prefs_record_repository.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 LlmConfig buildConfig({required String baseUrl, required String? apiKeyRef}) {
   return LlmConfig(
@@ -36,6 +38,10 @@ TranslationRecord buildRecord({required String id, required DateTime createdAt})
 }
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+  });
+
   test('InMemoryLlmConfigRepository loads and saves active config', () async {
     final repository = InMemoryLlmConfigRepository();
 
@@ -89,5 +95,28 @@ void main() {
 
     await repository.clearAll();
     expect(await repository.listRecent(), isEmpty);
+  });
+
+  test('SharedPrefsRecordRepository persists translation records across instances', () async {
+    final repository = SharedPrefsRecordRepository();
+    final firstRecord = buildRecord(id: 'record-1', createdAt: DateTime(2026, 4, 11, 10));
+    final secondRecord = buildRecord(id: 'record-2', createdAt: DateTime(2026, 4, 11, 11));
+
+    await repository.save(firstRecord);
+    await repository.save(secondRecord);
+
+    final reloaded = SharedPrefsRecordRepository();
+    final recent = await reloaded.listRecent();
+
+    expect(recent, hasLength(2));
+    expect(recent.first.id, 'record-2');
+    expect(recent.last.id, 'record-1');
+    expect((await reloaded.search('你好')).length, 2);
+
+    await reloaded.deleteById('record-1');
+    expect(await reloaded.getById('record-1'), isNull);
+
+    await reloaded.clearAll();
+    expect(await reloaded.listRecent(), isEmpty);
   });
 }
