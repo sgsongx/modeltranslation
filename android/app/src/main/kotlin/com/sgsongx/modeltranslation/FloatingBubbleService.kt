@@ -12,6 +12,7 @@ import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -36,7 +37,12 @@ class FloatingBubbleService : Service() {
 		windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 		ensureChannel(this)
 		trace("service.create")
-		createOverlayBubble()
+		if (!hasOverlayPermission()) {
+			trace("service.create:skipBubble missingOverlayPermission")
+			showToast("Overlay permission is required for floating bubble")
+		} else {
+			createOverlayBubble()
+		}
 		startForeground(NOTIFICATION_ID, buildNotification())
 	}
 
@@ -49,6 +55,11 @@ class FloatingBubbleService : Service() {
 			}
 			ACTION_SHOW_RESULT -> {
 				trace("service.showResult")
+				if (!hasOverlayPermission()) {
+					trace("service.showResult:blocked missingOverlayPermission")
+					showToast("Overlay permission is required for floating windows")
+					return START_STICKY
+				}
 				if (bubbleView == null) {
 					createOverlayBubble()
 				}
@@ -64,7 +75,9 @@ class FloatingBubbleService : Service() {
 			}
 			else -> {
 				trace("service.keepAlive")
-				if (bubbleView == null) {
+				if (!hasOverlayPermission()) {
+					trace("service.keepAlive:skipBubble missingOverlayPermission")
+				} else if (bubbleView == null) {
 					createOverlayBubble()
 				}
 			}
@@ -123,8 +136,13 @@ class FloatingBubbleService : Service() {
 			y = 240
 		}
 
-		windowManager.addView(bubble, layoutParams)
-		bubbleView = bubble
+		try {
+			windowManager.addView(bubble, layoutParams)
+			bubbleView = bubble
+		} catch (securityError: SecurityException) {
+			trace("service.bubble.create:securityException ${securityError.message}")
+			showToast("System blocked floating window. Please enable overlay permission.")
+		}
 	}
 
 	private fun releaseBubble() {
@@ -211,8 +229,13 @@ class FloatingBubbleService : Service() {
 			y = 380
 		}
 
-		windowManager.addView(container, params)
-		resultOverlayView = container
+		try {
+			windowManager.addView(container, params)
+			resultOverlayView = container
+		} catch (securityError: SecurityException) {
+			trace("service.overlay.show:securityException ${securityError.message}")
+			showToast("System blocked floating window. Please enable overlay permission.")
+		}
 	}
 
 	private fun buildRecentHistoryContent(payload: RecentHistoryPayload): View {
@@ -298,6 +321,14 @@ class FloatingBubbleService : Service() {
 
 	private fun showToast(message: String) {
 		Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+	}
+
+	private fun hasOverlayPermission(): Boolean {
+		return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+			Settings.canDrawOverlays(this)
+		} else {
+			true
+		}
 	}
 
 	private fun launchAction(actionId: String) {

@@ -257,8 +257,18 @@ private class ModelTranslationBridge(
 
 	private fun startFloatingBubble(): Boolean {
 		trace("bridge.bubble.start")
+		if (!hasOverlayPermission()) {
+			trace("bridge.bubble.start:blocked missingOverlayPermission")
+			throw IllegalStateException("Overlay permission is not granted")
+		}
+
 		FloatingBubbleService.ensureChannel(applicationContext)
-		FloatingBubbleService.start(applicationContext, diagnosticsEnabled)
+		try {
+			FloatingBubbleService.start(applicationContext, diagnosticsEnabled)
+		} catch (securityError: SecurityException) {
+			trace("bridge.bubble.start:securityException ${securityError.message}")
+			throw securityError
+		}
 		return true
 	}
 

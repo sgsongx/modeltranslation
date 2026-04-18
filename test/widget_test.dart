@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:modeltranslation/core/application/default_action_registry.dart';
 import 'package:modeltranslation/core/application/translate_clipboard_use_case_impl.dart';
@@ -34,8 +35,10 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   String? lastOverlayMessage;
   String? clipboardText;
   bool hasOverlayPermission = true;
+  List<bool>? overlayPermissionSequence;
   bool clipboardRestrictedWhenBackgrounded = false;
   bool _isBackgrounded = false;
+  PlatformException? startBubbleException;
   final List<String> operationLog = <String>[];
 
   void emitActionEvent(String actionId, {Map<String, Object?> payload = const <String, Object?>{}}) {
@@ -58,7 +61,14 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   }
 
   @override
-  Future<bool> hasOverlayPermissionGranted() async => hasOverlayPermission;
+  Future<bool> hasOverlayPermissionGranted() async {
+    final sequence = overlayPermissionSequence;
+    if (sequence != null && sequence.isNotEmpty) {
+      return sequence.removeAt(0);
+    }
+
+    return hasOverlayPermission;
+  }
 
   @override
   Future<BridgeCapabilities> getCapabilities() async {
@@ -97,6 +107,9 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
 
   @override
   Future<void> startFloatingBubble() async {
+    if (startBubbleException != null) {
+      throw startBubbleException!;
+    }
     startCalls++;
   }
 
@@ -256,6 +269,39 @@ void main() {
     await tester.pump();
 
     expect(gateway.openOverlaySettingsCalls, 1);
+  });
+
+  testWidgets('ModelTranslation app re-checks overlay permission before starting bubble', (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway()
+      ..overlayPermissionSequence = <bool>[true, false];
+
+    await tester.pumpWidget(ModelTranslationApp(platformBridgeGateway: gateway));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Start floating bubble'));
+    await tester.pumpAndSettle();
+
+    expect(gateway.startCalls, 0);
+    expect(find.text('Overlay permission required to start floating bubble'), findsOneWidget);
+    expect(find.text('Grant permission'), findsOneWidget);
+  });
+
+  testWidgets('ModelTranslation app shows status when native bubble start throws', (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway()
+      ..startBubbleException = PlatformException(
+        code: 'overlay_start_failed',
+        message: 'MIUI blocked floating window',
+      );
+
+    await tester.pumpWidget(ModelTranslationApp(platformBridgeGateway: gateway));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Start floating bubble'));
+    await tester.pumpAndSettle();
+
+    expect(gateway.startCalls, 0);
+    expect(find.textContaining('Failed to start floating bubble'), findsOneWidget);
+    expect(find.textContaining('MIUI blocked floating window'), findsOneWidget);
   });
 
   testWidgets('ModelTranslation app triggers sample overlay actions', (WidgetTester tester) async {

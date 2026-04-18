@@ -426,7 +426,18 @@ class _TranslationShellState extends State<TranslationShell> {
   }
 
   Future<void> _startBubble() async {
-    if (!hasOverlayPermission) {
+    final overlayPermission = await widget.platformBridgeGateway.hasOverlayPermissionGranted();
+    if (!mounted) {
+      return;
+    }
+
+    if (hasOverlayPermission != overlayPermission) {
+      setState(() {
+        hasOverlayPermission = overlayPermission;
+      });
+    }
+
+    if (!overlayPermission) {
       if (!mounted) {
         return;
       }
@@ -437,7 +448,22 @@ class _TranslationShellState extends State<TranslationShell> {
       return;
     }
 
-    await widget.platformBridgeGateway.startFloatingBubble();
+    try {
+      await widget.platformBridgeGateway.startFloatingBubble();
+    } on PlatformException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      final details = error.message?.trim();
+      setState(() {
+        statusMessage = details == null || details.isEmpty
+            ? 'Failed to start floating bubble. Check overlay/floating window permission in system settings.'
+            : 'Failed to start floating bubble: $details';
+      });
+      return;
+    }
+
     if (!mounted) {
       return;
     }
