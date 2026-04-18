@@ -15,6 +15,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   final StreamController<BridgeEvent> _eventController = StreamController<BridgeEvent>.broadcast();
+  double overlayFontSizeSp = 15.0;
 
   @override
   Future<String?> getClipboardText() async => null;
@@ -41,6 +42,14 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
 
   @override
   Future<void> setDiagnosticsEnabled(bool enabled) async {}
+
+  @override
+  Future<double> getOverlayFontSizeSp() async => overlayFontSizeSp;
+
+  @override
+  Future<void> setOverlayFontSizeSp(double value) async {
+    overlayFontSizeSp = value;
+  }
 
   @override
   Future<void> showOverlay({required String title, required String message}) async {}
@@ -166,6 +175,7 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField, 'Top P'), '0.9');
     await tester.enterText(find.widgetWithText(TextFormField, 'Max Tokens'), '1024');
     await tester.enterText(find.widgetWithText(TextFormField, 'Timeout (ms)'), '15000');
+    await tester.enterText(find.widgetWithText(TextFormField, 'Overlay Font Size (sp)'), '18');
     await tester.enterText(find.widgetWithText(TextFormField, 'System Prompt'), 'Translate with a concise style.');
 
     await tester.drag(find.byType(ListView).last, const Offset(0, -700));
@@ -179,6 +189,8 @@ void main() {
     expect(configRepository.activeConfig!.baseUrl, 'https://api.example.com/v1');
     expect(configRepository.activeConfig!.apiKeyRef, isNull);
     expect(configRepository.activeConfig!.model, 'gpt-4o-mini');
+    expect(configRepository.activeConfig!.overlayFontSizeSp, 18);
+    expect(platformGateway.overlayFontSizeSp, 18);
     expect(find.text('Configuration saved'), findsOneWidget);
   });
 

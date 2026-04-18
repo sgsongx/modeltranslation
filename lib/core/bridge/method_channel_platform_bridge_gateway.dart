@@ -62,6 +62,17 @@ class MethodChannelPlatformBridgeGateway implements PlatformBridgeGateway {
   }
 
   @override
+  Future<double> getOverlayFontSizeSp() async {
+    final value = await _methodChannel.invokeMethod<double>('getOverlayFontSizeSp');
+    return value ?? 15.0;
+  }
+
+  @override
+  Future<void> setOverlayFontSizeSp(double value) async {
+    await _methodChannel.invokeMethod<void>('setOverlayFontSizeSp', value);
+  }
+
+  @override
   Future<void> showOverlay({required String title, required String message}) async {
     _trace('platform.overlay.show:start title=$title messageLength=${message.length}');
     await _methodChannel.invokeMethod<void>('showOverlay', <String, Object?>{

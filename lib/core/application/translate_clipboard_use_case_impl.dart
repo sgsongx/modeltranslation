@@ -103,7 +103,11 @@ class TranslateClipboardUseCaseImpl implements TranslateClipboardUseCase {
       );
 
       _trace('overlay.show:result length=${translatedText.length}');
-      await _overlayGateway.showResult(translatedText);
+      await _overlayGateway.showResult(
+        sourceText: clipboardText,
+        translatedText: translatedText,
+        fontSizeSp: config.overlayFontSizeSp,
+      );
       _trace('record.save:start status=success');
       await _recordRepository.save(record);
       _trace('record.save:success id=${record.id}');

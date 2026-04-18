@@ -20,7 +20,9 @@ class FakeLlmGateway implements LlmGateway {
 }
 
 class FakeOverlayGateway implements OverlayGateway {
+  String? lastSource;
   String? lastResult;
+  double? lastFontSizeSp;
   String? lastError;
 
   @override
@@ -29,8 +31,14 @@ class FakeOverlayGateway implements OverlayGateway {
   }
 
   @override
-  Future<void> showResult(String translatedText) async {
+  Future<void> showResult({
+    required String sourceText,
+    required String translatedText,
+    required double fontSizeSp,
+  }) async {
+    lastSource = sourceText;
     lastResult = translatedText;
+    lastFontSizeSp = fontSizeSp;
   }
 }
 
@@ -113,10 +121,16 @@ void main() {
   test('OverlayGateway can show results and errors', () async {
     final gateway = FakeOverlayGateway();
 
-    await gateway.showResult('你好，世界');
+    await gateway.showResult(
+      sourceText: 'Hello world',
+      translatedText: '你好，世界',
+      fontSizeSp: 16,
+    );
     await gateway.showError('timeout');
 
+    expect(gateway.lastSource, 'Hello world');
     expect(gateway.lastResult, '你好，世界');
+    expect(gateway.lastFontSizeSp, 16);
     expect(gateway.lastError, 'timeout');
   });
 

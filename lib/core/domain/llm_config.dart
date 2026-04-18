@@ -10,6 +10,7 @@ class LlmConfig {
     required this.maxTokens,
     required this.timeoutMs,
     required this.systemPrompt,
+    this.overlayFontSizeSp = 15.0,
     required this.updatedAt,
   });
 
@@ -23,5 +24,6 @@ class LlmConfig {
   final int maxTokens;
   final int timeoutMs;
   final String systemPrompt;
+  final double overlayFontSizeSp;
   final DateTime updatedAt;
 }

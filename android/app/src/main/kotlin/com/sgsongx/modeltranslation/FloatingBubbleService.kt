@@ -17,6 +17,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.util.Log
+import android.util.TypedValue
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -55,6 +56,10 @@ class FloatingBubbleService : Service() {
 			}
 			ACTION_SHOW_RESULT -> {
 				trace("service.showResult")
+				val overlayFontSizeSp = intent
+					.getDoubleExtra(EXTRA_OVERLAY_FONT_SIZE_SP, DEFAULT_OVERLAY_FONT_SIZE_SP)
+					.toFloat()
+					.coerceIn(12f, 28f)
 				if (!hasOverlayPermission()) {
 					trace("service.showResult:blocked missingOverlayPermission")
 					showToast("Overlay permission is required for floating windows")
@@ -67,6 +72,7 @@ class FloatingBubbleService : Service() {
 					title = intent.getStringExtra(EXTRA_RESULT_TITLE) ?: "Translation Result",
 					message = intent.getStringExtra(EXTRA_RESULT_MESSAGE) ?: "",
 					showRetry = intent.getBooleanExtra(EXTRA_SHOW_RETRY, false),
+					overlayFontSizeSp = overlayFontSizeSp,
 				)
 			}
 			ACTION_HIDE_RESULT -> {
@@ -151,10 +157,25 @@ class FloatingBubbleService : Service() {
 		bubbleView = null
 	}
 
-	private fun showResultOverlay(title: String, message: String, showRetry: Boolean) {
+	private fun showResultOverlay(
+		title: String,
+		message: String,
+		showRetry: Boolean,
+		overlayFontSizeSp: Float,
+	) {
 		trace("service.overlay.show title=$title messageLength=${message.length} showRetry=$showRetry")
 		hideResultOverlay()
-		val recentHistory = if (title == "Recent History") parseRecentHistoryPayload(message) else null
+		val recentHistory = if (title == "Recent History") parseRecentHistoryPayload(message, overlayFontSizeSp) else null
+		val translationResult = if (title == "Translation Result") {
+			parseTranslationResultPayload(message, overlayFontSizeSp)
+		} else {
+			null
+		}
+
+		val screenWidth = resources.displayMetrics.widthPixels
+		val screenHeight = resources.displayMetrics.heightPixels
+		val overlayWidth = (screenWidth * 0.92f).toInt()
+		val overlayHeight = (screenHeight * 0.72f).toInt()
 
 		val container = LinearLayout(this).apply {
 			orientation = LinearLayout.VERTICAL
@@ -163,20 +184,27 @@ class FloatingBubbleService : Service() {
 			addView(
 				TextView(context).apply {
 					text = title
-					textSize = 18f
+					setTextSize(TypedValue.COMPLEX_UNIT_SP, overlayFontSizeSp + 2f)
 				}
 			)
-			if (recentHistory == null) {
-				addView(
-					TextView(context).apply {
-						text = message.ifEmpty { "(empty)" }
-						textSize = 15f
-						setPadding(0, 16, 0, 16)
-					}
-				)
-			} else {
-				addView(buildRecentHistoryContent(recentHistory))
+
+			val bodyView = when {
+				recentHistory != null -> buildRecentHistoryContent(recentHistory)
+				translationResult != null -> buildTranslationResultContent(translationResult)
+				else -> buildPlainTextOverlayBody(message, overlayFontSizeSp)
 			}
+
+			addView(
+				ScrollView(context).apply {
+					setPadding(0, 16, 0, 16)
+					addView(bodyView)
+					layoutParams = LinearLayout.LayoutParams(
+						LinearLayout.LayoutParams.MATCH_PARENT,
+						0,
+						1f,
+					)
+				}
+			)
 
 			val actionRow = LinearLayout(context).apply {
 				orientation = LinearLayout.HORIZONTAL
@@ -196,7 +224,9 @@ class FloatingBubbleService : Service() {
 					Button(context).apply {
 						text = "Copy"
 						setOnClickListener {
-							copyToClipboard(message)
+							val copyText = translationResult?.translatedText ?: message
+							copyToClipboard(copyText)
+							showToast("Copied")
 						}
 					}
 				)
@@ -219,14 +249,13 @@ class FloatingBubbleService : Service() {
 		}
 
 		val params = WindowManager.LayoutParams(
-			WindowManager.LayoutParams.WRAP_CONTENT,
-			WindowManager.LayoutParams.WRAP_CONTENT,
+			overlayWidth,
+			overlayHeight,
 			layoutType,
-			WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+			WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
 			PixelFormat.TRANSLUCENT,
 		).apply {
-			gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-			y = 380
+			gravity = Gravity.CENTER
 		}
 
 		try {
@@ -238,11 +267,53 @@ class FloatingBubbleService : Service() {
 		}
 	}
 
+	private fun buildPlainTextOverlayBody(message: String, fontSizeSp: Float): View {
+		return TextView(this).apply {
+			text = message.ifEmpty { "(empty)" }
+			setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp)
+			setPadding(0, 8, 0, 8)
+		}
+	}
+
+	private fun buildTranslationResultContent(payload: TranslationResultPayload): View {
+		val fontSizeSp = payload.fontSizeSp
+		return LinearLayout(this).apply {
+			orientation = LinearLayout.VERTICAL
+			addView(
+				TextView(context).apply {
+					text = "Original"
+					setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp)
+				}
+			)
+			addView(
+				TextView(context).apply {
+					text = payload.sourceText.ifEmpty { "(empty)" }
+					setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp)
+					setPadding(0, 8, 0, 16)
+				}
+			)
+			addView(
+				TextView(context).apply {
+					text = "Translation"
+					setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp)
+				}
+			)
+			addView(
+				TextView(context).apply {
+					text = payload.translatedText.ifEmpty { "(empty)" }
+					setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp)
+					setPadding(0, 8, 0, 8)
+				}
+			)
+		}
+	}
+
 	private fun buildRecentHistoryContent(payload: RecentHistoryPayload): View {
+		val fontSizeSp = payload.fontSizeSp
 		if (payload.entries.isEmpty()) {
 			return TextView(this).apply {
 				text = payload.emptyHint.ifEmpty { "No translation history yet. Tap the bubble once to translate first." }
-				textSize = 15f
+				setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp)
 				setPadding(0, 16, 0, 16)
 			}
 		}
@@ -252,30 +323,62 @@ class FloatingBubbleService : Service() {
 		}
 
 		payload.entries.forEachIndexed { index, entry ->
-			val row = TextView(this).apply {
-				text = "${index + 1}. ${entry.sourceText}\n→ ${entry.translatedText}\n${entry.createdAt}  [${entry.status}]"
-				textSize = 14f
-				setPadding(0, 12, 0, 12)
-				setOnClickListener {
-					copyToClipboard(entry.translatedText, "history_translated")
-					showToast("Copied translation")
+			val row = LinearLayout(this).apply {
+				orientation = LinearLayout.VERTICAL
+				setPadding(0, 12, 0, 16)
+				addView(
+					TextView(context).apply {
+						text = "${index + 1}. ${entry.sourceText}"
+						setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp)
+					}
+				)
+				addView(
+					TextView(context).apply {
+						text = "→ ${entry.translatedText}"
+						setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp)
+						setPadding(0, 6, 0, 6)
+					}
+				)
+				addView(
+					TextView(context).apply {
+						text = "${entry.createdAt}  [${entry.status}]"
+						setTextSize(TypedValue.COMPLEX_UNIT_SP, (fontSizeSp - 1f).coerceAtLeast(10f))
+					}
+				)
+
+				val quickActionRow = LinearLayout(context).apply {
+					orientation = LinearLayout.HORIZONTAL
+					gravity = Gravity.START
+					setPadding(0, 8, 0, 0)
+					addView(
+						Button(context).apply {
+							text = "Copy original"
+							setOnClickListener {
+								copyToClipboard(entry.sourceText, "history_source")
+								showToast("Copied source text")
+							}
+						}
+					)
+					addView(
+						Button(context).apply {
+							text = "Copy translation"
+							setOnClickListener {
+								copyToClipboard(entry.translatedText, "history_translated")
+								showToast("Copied translation")
+							}
+						}
+					)
 				}
-				setOnLongClickListener {
-					copyToClipboard(entry.sourceText, "history_source")
-					showToast("Copied source text")
-					true
-				}
+				addView(quickActionRow)
 			}
+
 			listContainer.addView(row)
 		}
 
-		return ScrollView(this).apply {
-			setPadding(0, 16, 0, 16)
-			addView(listContainer)
-		}
+		return listContainer
 	}
 
-	private fun parseRecentHistoryPayload(message: String): RecentHistoryPayload? {
+	private fun parseRecentHistoryPayload(message: String, fallbackFontSizeSp: Float): RecentHistoryPayload? {
 		return try {
 			val root = JSONObject(message)
 			if (root.optString("type") != "recent_history_v1") {
@@ -301,9 +404,35 @@ class FloatingBubbleService : Service() {
 			RecentHistoryPayload(
 				entries = entries,
 				emptyHint = root.optString("emptyHint", ""),
+				fontSizeSp = root.optDouble("fontSizeSp", fallbackFontSizeSp.toDouble()).toFloat().coerceIn(12f, 28f),
 			)
 		} catch (_: Throwable) {
 			null
+		}
+	}
+
+	private fun parseTranslationResultPayload(message: String, fallbackFontSizeSp: Float): TranslationResultPayload {
+		return try {
+			val root = JSONObject(message)
+			if (root.optString("type") != "translation_result_v1") {
+				return TranslationResultPayload(
+					sourceText = "Source text unavailable",
+					translatedText = message,
+					fontSizeSp = fallbackFontSizeSp,
+				)
+			}
+
+			TranslationResultPayload(
+				sourceText = root.optString("sourceText", "Source text unavailable"),
+				translatedText = root.optString("translatedText", ""),
+				fontSizeSp = root.optDouble("fontSizeSp", fallbackFontSizeSp.toDouble()).toFloat().coerceIn(12f, 28f),
+			)
+		} catch (_: Throwable) {
+			TranslationResultPayload(
+				sourceText = "Source text unavailable",
+				translatedText = message,
+				fontSizeSp = fallbackFontSizeSp,
+			)
 		}
 	}
 
@@ -377,8 +506,10 @@ class FloatingBubbleService : Service() {
 		const val EXTRA_RESULT_TITLE = "extra_result_title"
 		const val EXTRA_RESULT_MESSAGE = "extra_result_message"
 		const val EXTRA_SHOW_RETRY = "extra_show_retry"
+		const val EXTRA_OVERLAY_FONT_SIZE_SP = "extra_overlay_font_size_sp"
 		const val EXTRA_DIAGNOSTICS_ENABLED = "extra_diagnostics_enabled"
 		const val EXTRA_FROM_FLOATING_BUBBLE = "extra_from_floating_bubble"
+		private const val DEFAULT_OVERLAY_FONT_SIZE_SP = 15.0
 		private const val CHANNEL_ID = "modeltranslation.floating_bubble"
 		private const val NOTIFICATION_ID = 1001
 
@@ -409,6 +540,7 @@ class FloatingBubbleService : Service() {
 			message: String,
 			showRetry: Boolean = false,
 			diagnosticsEnabled: Boolean = false,
+			overlayFontSizeSp: Double = DEFAULT_OVERLAY_FONT_SIZE_SP,
 		) {
 			context.startService(
 				Intent(context, FloatingBubbleService::class.java).apply {
@@ -416,6 +548,7 @@ class FloatingBubbleService : Service() {
 					putExtra(EXTRA_RESULT_TITLE, title)
 					putExtra(EXTRA_RESULT_MESSAGE, message)
 					putExtra(EXTRA_SHOW_RETRY, showRetry)
+					putExtra(EXTRA_OVERLAY_FONT_SIZE_SP, overlayFontSizeSp)
 					putExtra(EXTRA_DIAGNOSTICS_ENABLED, diagnosticsEnabled)
 				}
 			)
@@ -467,5 +600,12 @@ class FloatingBubbleService : Service() {
 	private data class RecentHistoryPayload(
 		val entries: List<HistoryEntry>,
 		val emptyHint: String,
+		val fontSizeSp: Float,
+	)
+
+	private data class TranslationResultPayload(
+		val sourceText: String,
+		val translatedText: String,
+		val fontSizeSp: Float,
 	)
 }

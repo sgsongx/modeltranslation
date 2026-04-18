@@ -59,7 +59,11 @@ class FakeOverlayGateway implements OverlayGateway {
   Future<void> showError(String message) async {}
 
   @override
-  Future<void> showResult(String translatedText) async {}
+  Future<void> showResult({
+    required String sourceText,
+    required String translatedText,
+    required double fontSizeSp,
+  }) async {}
 }
 
 class FakeRecordRepository implements RecordRepository {

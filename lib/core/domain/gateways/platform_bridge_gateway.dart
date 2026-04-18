@@ -27,6 +27,10 @@ abstract class PlatformBridgeGateway {
 
   Future<void> setDiagnosticsEnabled(bool enabled);
 
+  Future<double> getOverlayFontSizeSp();
+
+  Future<void> setOverlayFontSizeSp(double value);
+
   Future<void> startFloatingBubble();
 
   Future<void> stopFloatingBubble();

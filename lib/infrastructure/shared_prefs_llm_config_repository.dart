@@ -48,6 +48,7 @@ class SharedPrefsLlmConfigRepository implements LlmConfigRepository {
       'maxTokens': config.maxTokens,
       'timeoutMs': config.timeoutMs,
       'systemPrompt': config.systemPrompt,
+      'overlayFontSizeSp': config.overlayFontSizeSp,
       'updatedAt': config.updatedAt.toIso8601String(),
     };
   }
@@ -64,6 +65,7 @@ class SharedPrefsLlmConfigRepository implements LlmConfigRepository {
       maxTokens: (map['maxTokens'] as num?)?.toInt() ?? 512,
       timeoutMs: (map['timeoutMs'] as num?)?.toInt() ?? 12000,
       systemPrompt: (map['systemPrompt'] as String?) ?? 'Translate the text accurately and keep formatting.',
+      overlayFontSizeSp: (map['overlayFontSizeSp'] as num?)?.toDouble() ?? 15.0,
       updatedAt: DateTime.tryParse((map['updatedAt'] as String?) ?? '') ?? DateTime.now(),
     );
   }

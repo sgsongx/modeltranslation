@@ -1,6 +1,7 @@
 import 'package:modeltranslation/core/domain/gateways/clipboard_gateway.dart';
 import 'package:modeltranslation/core/domain/gateways/overlay_gateway.dart';
 import 'package:modeltranslation/core/domain/gateways/platform_bridge_gateway.dart';
+import 'dart:convert';
 
 class PlatformClipboardGateway implements ClipboardGateway {
   PlatformClipboardGateway(this._platformBridgeGateway);
@@ -27,10 +28,21 @@ class PlatformOverlayGateway implements OverlayGateway {
   }
 
   @override
-  Future<void> showResult(String translatedText) async {
+  Future<void> showResult({
+    required String sourceText,
+    required String translatedText,
+    required double fontSizeSp,
+  }) async {
+    final payload = <String, Object?>{
+      'type': 'translation_result_v1',
+      'sourceText': sourceText,
+      'translatedText': translatedText,
+      'fontSizeSp': fontSizeSp,
+    };
+
     await _platformBridgeGateway.showOverlay(
       title: 'Translation Result',
-      message: translatedText,
+      message: jsonEncode(payload),
     );
   }
 }

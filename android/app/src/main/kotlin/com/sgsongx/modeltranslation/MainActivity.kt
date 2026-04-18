@@ -133,6 +133,12 @@ private class ModelTranslationBridge(
 				trace("diagnostics.enabled=$diagnosticsEnabled")
 				result.success(true)
 			}
+			"getOverlayFontSizeSp" -> result.success(getOverlayFontSizeSp())
+			"setOverlayFontSizeSp" -> {
+				val fontSize = (call.arguments as? Number)?.toDouble() ?: DEFAULT_OVERLAY_FONT_SIZE_SP
+				setOverlayFontSizeSp(fontSize)
+				result.success(true)
+			}
 			"getClipboardText" -> result.success(readClipboardText())
 			"hasOverlayPermission" -> result.success(hasOverlayPermission())
 			"openOverlayPermissionSettings" -> result.success(openOverlayPermissionSettings())
@@ -194,10 +200,18 @@ private class ModelTranslationBridge(
 		val title = call.argument<String>("title") ?: "Translation Result"
 		val message = call.argument<String>("message") ?: ""
 		val showRetry = title == "Translation Error"
+		val overlayFontSizeSp = getOverlayFontSizeSp()
 		trace("bridge.overlay.show title=$title messageLength=${message.length} showRetry=$showRetry")
 		FloatingBubbleService.ensureChannel(applicationContext)
 		FloatingBubbleService.start(applicationContext, diagnosticsEnabled)
-		FloatingBubbleService.showResult(applicationContext, title, message, showRetry, diagnosticsEnabled)
+		FloatingBubbleService.showResult(
+			context = applicationContext,
+			title = title,
+			message = message,
+			showRetry = showRetry,
+			diagnosticsEnabled = diagnosticsEnabled,
+			overlayFontSizeSp = overlayFontSizeSp,
+		)
 		return true
 	}
 
@@ -253,6 +267,9 @@ private class ModelTranslationBridge(
 	companion object {
 		private const val METHOD_CHANNEL_NAME = "modeltranslation/platform"
 		private const val EVENT_CHANNEL_NAME = "modeltranslation/action_events"
+		private const val PREFS_NAME = "modeltranslation.bridge"
+		private const val PREF_OVERLAY_FONT_SIZE_SP = "overlay_font_size_sp"
+		private const val DEFAULT_OVERLAY_FONT_SIZE_SP = 15.0
 	}
 
 	private fun startFloatingBubble(): Boolean {
@@ -282,5 +299,17 @@ private class ModelTranslationBridge(
 		if (diagnosticsEnabled) {
 			Log.d("ModelTranslationBridge", message)
 		}
+	}
+
+	private fun getOverlayFontSizeSp(): Double {
+		val prefs = applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+		val value = prefs.getFloat(PREF_OVERLAY_FONT_SIZE_SP, DEFAULT_OVERLAY_FONT_SIZE_SP.toFloat()).toDouble()
+		return value.coerceIn(12.0, 28.0)
+	}
+
+	private fun setOverlayFontSizeSp(value: Double) {
+		val normalized = value.coerceIn(12.0, 28.0)
+		val prefs = applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+		prefs.edit().putFloat(PREF_OVERLAY_FONT_SIZE_SP, normalized.toFloat()).apply()
 	}
 }

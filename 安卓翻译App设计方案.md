@@ -28,18 +28,20 @@
 - 全局悬浮球常驻（前台服务 + Overlay）
 - 单击动作：`translate_clipboard`
 - 长按动作：`open_recent_history`（快速查看最近 3 条翻译）
-- 结果悬浮窗支持：查看、复制、关闭
+- 结果悬浮窗支持：查看原文、查看译文、复制、关闭
+- 历史悬浮窗支持：滚动浏览、复制原文、复制译文、关闭
+- 悬浮窗字体大小支持配置（12~28sp）并持久化存储
 
 ### 2.2.1 悬浮球交互细则（便捷 + 人性化）
 - 单击：立即翻译剪切板（保持原有最快路径）
 - 长按：显示“历史悬浮窗”，可直接浏览完整历史（无需切换到 App 主界面）
 - 历史展示规则：按时间倒序展示全部可用记录，支持滚动浏览
-- 点击某条历史：复制该条译文（决策 1.A）
-- 长按某条历史：回填该条原文到剪切板（决策 2.A）
+- 每条历史提供快捷按钮：`Copy original` 与 `Copy translation`
 - 空历史提示：`No translation history yet. Tap the bubble once to translate first.`
 - 失败兜底：历史加载失败时展示错误摘要，不阻断悬浮球继续使用
 - 背景切换策略：从悬浮球触发时自动回到后台，减少界面打断
 - 触觉反馈：默认关闭（决策 4.B）
+- 布局约束：悬浮窗采用“固定最大高度 + 内容滚动 + 底部操作栏固定”，保证 `Close` 按钮始终可见
 
 ## 2.3 翻译处理链路
 - 读取剪切板文本
@@ -99,7 +101,7 @@
 4. 读取剪切板文本 -> 参数校验 -> 获取当前模型配置  
 5. 调用 `LlmGateway.translate()`  
 6. 成功：  
-   - 调 `OverlayGateway.showResult()` 显示悬浮窗  
+  - 调 `OverlayGateway.showResult()` 显示悬浮窗（含原文+译文结构化负载）  
    - 调 `RecordRepository.save()` 落库  
 7. 失败：  
    - 悬浮窗展示错误摘要与重试入口  
@@ -111,7 +113,7 @@
 2. 通过 EventChannel 发出 `onAction("open_recent_history")`
 3. Flutter Application/Presentation 层加载历史记录（按时间倒序）
 4. 组装结构化历史负载（sourceText / translatedText / createdAt / status）
-5. 调 `OverlayGateway.showResult()` 展示“Recent History”悬浮窗
+5. 调 `OverlayGateway.showResult()` 展示“Recent History”悬浮窗（附带字体大小配置）
 6. 在悬浮窗内完成记录复制与回填，无需跳转 History 页
 
 ---
@@ -136,7 +138,7 @@
 ## 7. 数据模型（建议）
 
 - `LlmConfig`
-  - id, provider, baseUrl, apiKeyRef, model, temperature, topP, maxTokens, timeoutMs, systemPrompt, updatedAt
+  - id, provider, baseUrl, apiKeyRef, model, temperature, topP, maxTokens, timeoutMs, systemPrompt, overlayFontSizeSp, updatedAt
 - `TranslationRequest`
   - sourceText, sourceLang?, targetLang, stylePreset, configSnapshot
 - `TranslationRecord`
@@ -167,6 +169,8 @@
 - 长按时历史为空：给出引导文案而非报错
 - 长按时历史加载失败：展示错误摘要并允许用户继续单击翻译
 - 历史条目过多：悬浮窗内部滚动浏览，避免遮挡主画面
+- 历史条目过多：底部操作栏固定，关闭按钮不随内容滚动
+- MIUI 等系统限制：Overlay addView 失败时给出可见提示，避免“静默失败”
 
 ---
 
@@ -200,6 +204,9 @@
 4. 异常路径有清晰反馈，不出现“无响应”  
 5. 新增动作时无需修改翻译核心用例代码
 6. 长按悬浮球可在 1 次操作内查看最近历史，空状态有明确引导
+7. 历史悬浮窗在大量数据下仍可关闭，不出现按钮越界
+8. 可在设置页调整悬浮窗字体并在重启后保持生效
+9. 历史悬浮窗支持一键复制原文/译文，结果悬浮窗同时展示原文与译文
 
 ---
 

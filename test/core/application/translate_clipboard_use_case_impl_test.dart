@@ -42,7 +42,9 @@ class FakeLlmGateway implements LlmGateway {
 }
 
 class FakeOverlayGateway implements OverlayGateway {
+  String? lastSource;
   String? lastResult;
+  double? lastFontSizeSp;
   String? lastError;
 
   @override
@@ -51,8 +53,14 @@ class FakeOverlayGateway implements OverlayGateway {
   }
 
   @override
-  Future<void> showResult(String translatedText) async {
+  Future<void> showResult({
+    required String sourceText,
+    required String translatedText,
+    required double fontSizeSp,
+  }) async {
+    lastSource = sourceText;
     lastResult = translatedText;
+    lastFontSizeSp = fontSizeSp;
   }
 }
 
@@ -134,7 +142,9 @@ void main() {
     expect(result.value?.translatedText, '你好，世界');
     expect(llmGateway.lastRequest?.sourceText, 'Hello world');
     expect(llmGateway.lastRequest?.targetLang, 'zh');
+    expect(overlayGateway.lastSource, 'Hello world');
     expect(overlayGateway.lastResult, '你好，世界');
+    expect(overlayGateway.lastFontSizeSp, 15.0);
     expect(recordRepository.savedRecords, hasLength(1));
     expect(recordRepository.savedRecords.single.id, 'record-1');
   });

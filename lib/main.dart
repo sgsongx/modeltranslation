@@ -204,11 +204,13 @@ class TranslationShell extends StatefulWidget {
 
 class _TranslationShellState extends State<TranslationShell> {
   static const int _historyOverlayLimit = 5000;
+  static const double _defaultOverlayFontSizeSp = 15.0;
 
   String? clipboardText;
   String statusMessage = 'Ready';
   bool supportsFloatingBubble = false;
   bool hasOverlayPermission = true;
+  double overlayFontSizeSp = _defaultOverlayFontSizeSp;
   BridgeCapabilities? capabilities;
   StreamSubscription? _eventSubscription;
 
@@ -227,6 +229,9 @@ class _TranslationShellState extends State<TranslationShell> {
   Future<void> _bootstrap() async {
     await widget.platformBridgeGateway.setDiagnosticsEnabled(widget.enableDiagnosticsLogging);
     final bridgeCapabilities = await widget.platformBridgeGateway.getCapabilities();
+    final activeConfig = await widget.llmConfigRepository?.loadActive();
+    final resolvedOverlayFontSize =
+      activeConfig?.overlayFontSizeSp ?? await widget.platformBridgeGateway.getOverlayFontSizeSp();
     final overlayPermission = bridgeCapabilities.supportsOverlay
         ? await widget.platformBridgeGateway.hasOverlayPermissionGranted()
         : true;
@@ -238,6 +243,7 @@ class _TranslationShellState extends State<TranslationShell> {
       capabilities = bridgeCapabilities;
       supportsFloatingBubble = bridgeCapabilities.supportsFloatingBubble;
       hasOverlayPermission = overlayPermission;
+      overlayFontSizeSp = resolvedOverlayFontSize;
       statusMessage = 'Bridge connected';
     });
 
@@ -354,7 +360,12 @@ class _TranslationShellState extends State<TranslationShell> {
 
     await widget.platformBridgeGateway.showOverlay(
       title: 'Translation Result',
-      message: message,
+      message: _buildTranslationResultOverlayPayload(
+        sourceText: (event.payload['sourceText'] as String?) ??
+            (event.payload['clipboardText'] as String?) ??
+            'Source text unavailable',
+        translatedText: message,
+      ),
     );
 
     if (!mounted) {
@@ -406,9 +417,10 @@ class _TranslationShellState extends State<TranslationShell> {
   String _buildRecentHistoryOverlayPayload(List<TranslationRecord> records) {
     final payload = <String, Object?>{
       'type': 'recent_history_v1',
+      'fontSizeSp': overlayFontSizeSp,
       'interaction': <String, Object?>{
-        'tap': 'copy_translated',
-        'longPress': 'copy_source',
+        'copySource': 'button',
+        'copyTranslated': 'button',
       },
       'entries': records
           .map(
@@ -421,6 +433,19 @@ class _TranslationShellState extends State<TranslationShell> {
             },
           )
           .toList(growable: false),
+    };
+    return jsonEncode(payload);
+  }
+
+  String _buildTranslationResultOverlayPayload({
+    required String sourceText,
+    required String translatedText,
+  }) {
+    final payload = <String, Object?>{
+      'type': 'translation_result_v1',
+      'sourceText': sourceText,
+      'translatedText': translatedText,
+      'fontSizeSp': overlayFontSizeSp,
     };
     return jsonEncode(payload);
   }
@@ -510,7 +535,10 @@ class _TranslationShellState extends State<TranslationShell> {
   Future<void> _showSampleOverlay() async {
     await widget.platformBridgeGateway.showOverlay(
       title: 'Translation Result',
-      message: clipboardText ?? 'Sample translated content. Tap Copy or Close in the overlay.',
+      message: _buildTranslationResultOverlayPayload(
+        sourceText: clipboardText ?? 'Sample source content',
+        translatedText: clipboardText ?? 'Sample translated content. Tap Copy or Close in the overlay.',
+      ),
     );
     if (!mounted) {
       return;
@@ -569,9 +597,19 @@ class _TranslationShellState extends State<TranslationShell> {
               ),
               _SettingsSection(
                 capabilities: capabilities,
+                platformBridgeGateway: widget.platformBridgeGateway,
                 llmConfigRepository: widget.llmConfigRepository,
                 apiKeySecurityUseCase: widget.apiKeySecurityUseCase,
                 llmConnectionTester: widget.llmConnectionTester,
+                onOverlayFontSizeChanged: (value) {
+                  if (!mounted) {
+                    return;
+                  }
+
+                  setState(() {
+                    overlayFontSizeSp = value;
+                  });
+                },
               ),
               _HistorySection(translationHistoryUseCase: widget.translationHistoryUseCase),
             ],
@@ -688,15 +726,19 @@ class _ControlSection extends StatelessWidget {
 class _SettingsSection extends StatefulWidget {
   const _SettingsSection({
     required this.capabilities,
+    required this.platformBridgeGateway,
     required this.llmConfigRepository,
     required this.apiKeySecurityUseCase,
     required this.llmConnectionTester,
+    required this.onOverlayFontSizeChanged,
   });
 
   final BridgeCapabilities? capabilities;
+  final PlatformBridgeGateway platformBridgeGateway;
   final LlmConfigRepository? llmConfigRepository;
   final ApiKeySecurityUseCase? apiKeySecurityUseCase;
   final LlmConnectionTester? llmConnectionTester;
+  final ValueChanged<double> onOverlayFontSizeChanged;
 
   @override
   State<_SettingsSection> createState() => _SettingsSectionState();
@@ -711,6 +753,7 @@ class _SettingsSectionState extends State<_SettingsSection> {
   final TextEditingController _topPController = TextEditingController();
   final TextEditingController _maxTokensController = TextEditingController();
   final TextEditingController _timeoutMsController = TextEditingController();
+  final TextEditingController _overlayFontSizeController = TextEditingController();
   final TextEditingController _systemPromptController = TextEditingController();
   String? _apiKeyRef;
   String statusMessage = 'Configuration not saved';
@@ -731,6 +774,7 @@ class _SettingsSectionState extends State<_SettingsSection> {
     _topPController.dispose();
     _maxTokensController.dispose();
     _timeoutMsController.dispose();
+    _overlayFontSizeController.dispose();
     _systemPromptController.dispose();
     super.dispose();
   }
@@ -755,7 +799,12 @@ class _SettingsSectionState extends State<_SettingsSection> {
 
     if (activeConfig != null) {
       _applyConfig(activeConfig);
+      widget.onOverlayFontSizeChanged(activeConfig.overlayFontSizeSp);
       statusMessage = 'Loaded saved configuration';
+    } else {
+      final fontSizeSp = await widget.platformBridgeGateway.getOverlayFontSizeSp();
+      _overlayFontSizeController.text = fontSizeSp.toStringAsFixed(1);
+      widget.onOverlayFontSizeChanged(fontSizeSp);
     }
 
     setState(() {
@@ -771,6 +820,7 @@ class _SettingsSectionState extends State<_SettingsSection> {
     _topPController.text = config.topP.toString();
     _maxTokensController.text = config.maxTokens.toString();
     _timeoutMsController.text = config.timeoutMs.toString();
+    _overlayFontSizeController.text = config.overlayFontSizeSp.toStringAsFixed(1);
     _systemPromptController.text = config.systemPrompt;
   }
 
@@ -828,11 +878,14 @@ class _SettingsSectionState extends State<_SettingsSection> {
       topP: double.parse(_topPController.text.trim()),
       maxTokens: int.parse(_maxTokensController.text.trim()),
       timeoutMs: int.parse(_timeoutMsController.text.trim()),
+      overlayFontSizeSp: double.parse(_overlayFontSizeController.text.trim()),
       systemPrompt: _systemPromptController.text.trim(),
       updatedAt: DateTime.now(),
     );
 
     await configRepository.saveActive(config);
+    await widget.platformBridgeGateway.setOverlayFontSizeSp(config.overlayFontSizeSp);
+    widget.onOverlayFontSizeChanged(config.overlayFontSizeSp);
     if (!mounted) {
       return;
     }
@@ -904,6 +957,7 @@ class _SettingsSectionState extends State<_SettingsSection> {
       topP: double.parse(_topPController.text.trim()),
       maxTokens: int.parse(_maxTokensController.text.trim()),
       timeoutMs: int.parse(_timeoutMsController.text.trim()),
+      overlayFontSizeSp: double.parse(_overlayFontSizeController.text.trim()),
       systemPrompt: _systemPromptController.text.trim(),
       updatedAt: DateTime.now(),
     );
@@ -968,6 +1022,11 @@ class _SettingsSectionState extends State<_SettingsSection> {
                   _TextFieldRow(controller: _topPController, label: 'Top P', validator: _doubleText),
                   _TextFieldRow(controller: _maxTokensController, label: 'Max Tokens', validator: _intText),
                   _TextFieldRow(controller: _timeoutMsController, label: 'Timeout (ms)', validator: _intText),
+                  _TextFieldRow(
+                    controller: _overlayFontSizeController,
+                    label: 'Overlay Font Size (sp)',
+                    validator: _overlayFontSizeText,
+                  ),
                   _TextFieldRow(controller: _systemPromptController, label: 'System Prompt', validator: _requiredText, maxLines: 3),
                   const SizedBox(height: 16),
                   FilledButton(
@@ -1012,6 +1071,19 @@ class _SettingsSectionState extends State<_SettingsSection> {
     if (parsedValue == null) {
       return 'Enter an integer';
     }
+    return null;
+  }
+
+  String? _overlayFontSizeText(String? value) {
+    final parsedValue = double.tryParse(value ?? '');
+    if (parsedValue == null) {
+      return 'Enter a number';
+    }
+
+    if (parsedValue < 12 || parsedValue > 28) {
+      return 'Use 12-28';
+    }
+
     return null;
   }
 }

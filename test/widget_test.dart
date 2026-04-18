@@ -31,6 +31,7 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   int openOverlaySettingsCalls = 0;
   int setDiagnosticsEnabledCalls = 0;
   bool? lastDiagnosticsEnabled;
+  double overlayFontSizeSp = 15.0;
   String? lastOverlayTitle;
   String? lastOverlayMessage;
   String? clipboardText;
@@ -90,6 +91,14 @@ class FakePlatformBridgeGateway implements PlatformBridgeGateway {
   Future<void> setDiagnosticsEnabled(bool enabled) async {
     setDiagnosticsEnabledCalls++;
     lastDiagnosticsEnabled = enabled;
+  }
+
+  @override
+  Future<double> getOverlayFontSizeSp() async => overlayFontSizeSp;
+
+  @override
+  Future<void> setOverlayFontSizeSp(double value) async {
+    overlayFontSizeSp = value;
   }
 
   @override
@@ -332,7 +341,8 @@ void main() {
 
     expect(gateway.showOverlayCalls, 1);
     expect(gateway.lastOverlayTitle, 'Translation Result');
-    expect(gateway.lastOverlayMessage, 'Hello from clipboard');
+    expect(gateway.lastOverlayMessage, contains('"type":"translation_result_v1"'));
+    expect(gateway.lastOverlayMessage, contains('"translatedText":"Hello from clipboard"'));
   });
 
   testWidgets('ModelTranslation app moves to background for floating bubble action', (WidgetTester tester) async {
@@ -381,7 +391,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(gateway.showOverlayCalls, 1);
-    expect(gateway.lastOverlayMessage, 'payload text');
+    expect(gateway.lastOverlayMessage, contains('"translatedText":"payload text"'));
   });
 
   testWidgets('ModelTranslation app ignores unknown action events', (WidgetTester tester) async {
@@ -629,7 +639,9 @@ void main() {
     expect(client.callCount, 1);
     expect(gateway.showOverlayCalls, 1);
     expect(gateway.lastOverlayTitle, 'Translation Result');
-    expect(gateway.lastOverlayMessage, '你好，世界');
+    expect(gateway.lastOverlayMessage, contains('"type":"translation_result_v1"'));
+    expect(gateway.lastOverlayMessage, contains('"sourceText":"Hello from clipboard"'));
+    expect(gateway.lastOverlayMessage, contains('"translatedText":"你好，世界"'));
     expect(recordRepository.listRecent(), completion(hasLength(1)));
   });
 
