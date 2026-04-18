@@ -218,6 +218,7 @@ class _TranslationShellState extends State<TranslationShell> {
   void initState() {
     super.initState();
     _bootstrap();
+    _startBubble();
   }
 
   @override
