@@ -203,7 +203,7 @@ class TranslationShell extends StatefulWidget {
 }
 
 class _TranslationShellState extends State<TranslationShell> {
-  static const int _historyOverlayLimit = 5000;
+  static const int _defaultHistoryOverlayLimit = 3;
   static const double _defaultOverlayFontSizeSp = 15.0;
 
   String? clipboardText;
@@ -211,6 +211,7 @@ class _TranslationShellState extends State<TranslationShell> {
   bool supportsFloatingBubble = false;
   bool hasOverlayPermission = true;
   double overlayFontSizeSp = _defaultOverlayFontSizeSp;
+  int historyOverlayLimit = _defaultHistoryOverlayLimit;
   BridgeCapabilities? capabilities;
   StreamSubscription? _eventSubscription;
 
@@ -233,6 +234,7 @@ class _TranslationShellState extends State<TranslationShell> {
     final activeConfig = await widget.llmConfigRepository?.loadActive();
     final resolvedOverlayFontSize =
       activeConfig?.overlayFontSizeSp ?? await widget.platformBridgeGateway.getOverlayFontSizeSp();
+    final resolvedHistoryOverlayLimit = activeConfig?.historyOverlayLimit ?? _defaultHistoryOverlayLimit;
     final overlayPermission = bridgeCapabilities.supportsOverlay
         ? await widget.platformBridgeGateway.hasOverlayPermissionGranted()
         : true;
@@ -245,6 +247,7 @@ class _TranslationShellState extends State<TranslationShell> {
       supportsFloatingBubble = bridgeCapabilities.supportsFloatingBubble;
       hasOverlayPermission = overlayPermission;
       overlayFontSizeSp = resolvedOverlayFontSize;
+      historyOverlayLimit = resolvedHistoryOverlayLimit;
       statusMessage = 'Bridge connected';
     });
 
@@ -387,7 +390,7 @@ class _TranslationShellState extends State<TranslationShell> {
     if (historyUseCase == null) {
       message = 'History source is not connected.';
     } else {
-      final result = await historyUseCase.loadRecent(limit: _historyOverlayLimit);
+      final result = await historyUseCase.loadRecent(limit: historyOverlayLimit);
       if (!result.isSuccess || result.value == null) {
         message = result.failure?.message ?? 'Failed to load recent history.';
       } else if (result.value!.isEmpty) {
@@ -611,6 +614,15 @@ class _TranslationShellState extends State<TranslationShell> {
                     overlayFontSizeSp = value;
                   });
                 },
+                onHistoryOverlayLimitChanged: (value) {
+                  if (!mounted) {
+                    return;
+                  }
+
+                  setState(() {
+                    historyOverlayLimit = value;
+                  });
+                },
               ),
               _HistorySection(translationHistoryUseCase: widget.translationHistoryUseCase),
             ],
@@ -732,6 +744,7 @@ class _SettingsSection extends StatefulWidget {
     required this.apiKeySecurityUseCase,
     required this.llmConnectionTester,
     required this.onOverlayFontSizeChanged,
+    required this.onHistoryOverlayLimitChanged,
   });
 
   final BridgeCapabilities? capabilities;
@@ -740,6 +753,7 @@ class _SettingsSection extends StatefulWidget {
   final ApiKeySecurityUseCase? apiKeySecurityUseCase;
   final LlmConnectionTester? llmConnectionTester;
   final ValueChanged<double> onOverlayFontSizeChanged;
+  final ValueChanged<int> onHistoryOverlayLimitChanged;
 
   @override
   State<_SettingsSection> createState() => _SettingsSectionState();
@@ -755,6 +769,7 @@ class _SettingsSectionState extends State<_SettingsSection> {
   final TextEditingController _maxTokensController = TextEditingController();
   final TextEditingController _timeoutMsController = TextEditingController();
   final TextEditingController _overlayFontSizeController = TextEditingController();
+  final TextEditingController _historyOverlayLimitController = TextEditingController();
   final TextEditingController _systemPromptController = TextEditingController();
   String? _apiKeyRef;
   String statusMessage = 'Configuration not saved';
@@ -776,6 +791,7 @@ class _SettingsSectionState extends State<_SettingsSection> {
     _maxTokensController.dispose();
     _timeoutMsController.dispose();
     _overlayFontSizeController.dispose();
+    _historyOverlayLimitController.dispose();
     _systemPromptController.dispose();
     super.dispose();
   }
@@ -801,11 +817,14 @@ class _SettingsSectionState extends State<_SettingsSection> {
     if (activeConfig != null) {
       _applyConfig(activeConfig);
       widget.onOverlayFontSizeChanged(activeConfig.overlayFontSizeSp);
+      widget.onHistoryOverlayLimitChanged(activeConfig.historyOverlayLimit);
       statusMessage = 'Loaded saved configuration';
     } else {
       final fontSizeSp = await widget.platformBridgeGateway.getOverlayFontSizeSp();
       _overlayFontSizeController.text = fontSizeSp.toStringAsFixed(1);
       widget.onOverlayFontSizeChanged(fontSizeSp);
+      _historyOverlayLimitController.text = '3';
+      widget.onHistoryOverlayLimitChanged(3);
     }
 
     setState(() {
@@ -822,6 +841,7 @@ class _SettingsSectionState extends State<_SettingsSection> {
     _maxTokensController.text = config.maxTokens.toString();
     _timeoutMsController.text = config.timeoutMs.toString();
     _overlayFontSizeController.text = config.overlayFontSizeSp.toStringAsFixed(1);
+    _historyOverlayLimitController.text = config.historyOverlayLimit.toString();
     _systemPromptController.text = config.systemPrompt;
   }
 
@@ -880,6 +900,7 @@ class _SettingsSectionState extends State<_SettingsSection> {
       maxTokens: int.parse(_maxTokensController.text.trim()),
       timeoutMs: int.parse(_timeoutMsController.text.trim()),
       overlayFontSizeSp: double.parse(_overlayFontSizeController.text.trim()),
+      historyOverlayLimit: int.parse(_historyOverlayLimitController.text.trim()),
       systemPrompt: _systemPromptController.text.trim(),
       updatedAt: DateTime.now(),
     );
@@ -887,6 +908,7 @@ class _SettingsSectionState extends State<_SettingsSection> {
     await configRepository.saveActive(config);
     await widget.platformBridgeGateway.setOverlayFontSizeSp(config.overlayFontSizeSp);
     widget.onOverlayFontSizeChanged(config.overlayFontSizeSp);
+    widget.onHistoryOverlayLimitChanged(config.historyOverlayLimit);
     if (!mounted) {
       return;
     }
@@ -959,6 +981,7 @@ class _SettingsSectionState extends State<_SettingsSection> {
       maxTokens: int.parse(_maxTokensController.text.trim()),
       timeoutMs: int.parse(_timeoutMsController.text.trim()),
       overlayFontSizeSp: double.parse(_overlayFontSizeController.text.trim()),
+      historyOverlayLimit: int.parse(_historyOverlayLimitController.text.trim()),
       systemPrompt: _systemPromptController.text.trim(),
       updatedAt: DateTime.now(),
     );
@@ -1028,6 +1051,11 @@ class _SettingsSectionState extends State<_SettingsSection> {
                     label: 'Overlay Font Size (sp)',
                     validator: _overlayFontSizeText,
                   ),
+                  _TextFieldRow(
+                    controller: _historyOverlayLimitController,
+                    label: 'History Overlay Limit',
+                    validator: _historyOverlayLimitText,
+                  ),
                   _TextFieldRow(controller: _systemPromptController, label: 'System Prompt', validator: _requiredText, maxLines: 3),
                   const SizedBox(height: 16),
                   FilledButton(
@@ -1083,6 +1111,19 @@ class _SettingsSectionState extends State<_SettingsSection> {
 
     if (parsedValue < 12 || parsedValue > 28) {
       return 'Use 12-28';
+    }
+
+    return null;
+  }
+
+  String? _historyOverlayLimitText(String? value) {
+    final parsedValue = int.tryParse(value ?? '');
+    if (parsedValue == null) {
+      return 'Enter an integer';
+    }
+
+    if (parsedValue < 1 || parsedValue > 50) {
+      return 'Use 1-50';
     }
 
     return null;

@@ -167,6 +167,7 @@ void main() {
     expect(find.text('Top P'), findsOneWidget);
     expect(find.text('Max Tokens'), findsOneWidget);
     expect(find.text('Timeout (ms)'), findsOneWidget);
+    expect(find.text('History Overlay Limit'), findsOneWidget);
     expect(find.text('System Prompt'), findsOneWidget);
 
     await tester.enterText(find.widgetWithText(TextFormField, 'Base URL'), 'https://api.example.com/v1');
@@ -176,6 +177,7 @@ void main() {
     await tester.enterText(find.widgetWithText(TextFormField, 'Max Tokens'), '1024');
     await tester.enterText(find.widgetWithText(TextFormField, 'Timeout (ms)'), '15000');
     await tester.enterText(find.widgetWithText(TextFormField, 'Overlay Font Size (sp)'), '18');
+    await tester.enterText(find.widgetWithText(TextFormField, 'History Overlay Limit'), '4');
     await tester.enterText(find.widgetWithText(TextFormField, 'System Prompt'), 'Translate with a concise style.');
 
     await tester.drag(find.byType(ListView).last, const Offset(0, -700));
@@ -190,6 +192,7 @@ void main() {
     expect(configRepository.activeConfig!.apiKeyRef, isNull);
     expect(configRepository.activeConfig!.model, 'gpt-4o-mini');
     expect(configRepository.activeConfig!.overlayFontSizeSp, 18);
+    expect(configRepository.activeConfig!.historyOverlayLimit, 4);
     expect(platformGateway.overlayFontSizeSp, 18);
     expect(find.text('Configuration saved'), findsOneWidget);
   });

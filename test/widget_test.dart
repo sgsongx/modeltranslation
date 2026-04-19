@@ -225,13 +225,16 @@ void main() {
     expect(find.text('Stop floating bubble'), findsOneWidget);
     expect(find.text('Read clipboard'), findsOneWidget);
 
+    final baselineStartCalls = gateway.startCalls;
+    final baselineStopCalls = gateway.stopCalls;
+
     await tester.tap(find.text('Start floating bubble'));
     await tester.pump();
     await tester.tap(find.text('Stop floating bubble'));
     await tester.pump();
 
-    expect(gateway.startCalls, 1);
-    expect(gateway.stopCalls, 1);
+    expect(gateway.startCalls, baselineStartCalls + 1);
+    expect(gateway.stopCalls, baselineStopCalls + 1);
   });
 
   testWidgets('ModelTranslation app propagates diagnostics toggle to the bridge', (WidgetTester tester) async {
@@ -287,10 +290,12 @@ void main() {
     await tester.pumpWidget(ModelTranslationApp(platformBridgeGateway: gateway));
     await tester.pumpAndSettle();
 
+    final baselineStartCalls = gateway.startCalls;
+
     await tester.tap(find.text('Start floating bubble'));
     await tester.pumpAndSettle();
 
-    expect(gateway.startCalls, 0);
+    expect(gateway.startCalls, baselineStartCalls);
     expect(find.text('Overlay permission required to start floating bubble'), findsOneWidget);
     expect(find.text('Grant permission'), findsOneWidget);
   });
@@ -459,7 +464,7 @@ void main() {
     expect(gateway.lastOverlayMessage, contains('"translatedText"'));
   });
 
-  testWidgets('ModelTranslation app recent history overlay payload includes more than three records',
+  testWidgets('ModelTranslation app recent history overlay payload defaults to recent three records only',
       (WidgetTester tester) async {
     final gateway = FakePlatformBridgeGateway();
     final historyUseCase = FakeHistoryUseCase(
@@ -492,7 +497,67 @@ void main() {
 
     expect(gateway.showOverlayCalls, 1);
     expect(gateway.lastOverlayTitle, 'Recent History');
+    expect(gateway.lastOverlayMessage, contains('translated-0'));
+    expect(gateway.lastOverlayMessage, contains('translated-1'));
+    expect(gateway.lastOverlayMessage, contains('translated-2'));
+    expect(gateway.lastOverlayMessage, isNot(contains('translated-3')));
+  });
+
+  testWidgets('ModelTranslation app recent history overlay payload honors configured history limit',
+      (WidgetTester tester) async {
+    final gateway = FakePlatformBridgeGateway();
+    final configRepository = InMemoryLlmConfigRepository(
+      initialConfig: LlmConfig(
+        id: 'active-config',
+        provider: 'openai-compatible',
+        baseUrl: 'https://api.example.com/v1',
+        apiKeyRef: null,
+        model: 'gpt-4o-mini',
+        temperature: 0.2,
+        topP: 0.9,
+        maxTokens: 128,
+        timeoutMs: 5000,
+        systemPrompt: 'Translate accurately.',
+        historyOverlayLimit: 4,
+        updatedAt: DateTime(2026, 4, 11),
+      ),
+    );
+    final historyUseCase = FakeHistoryUseCase(
+      List<TranslationRecord>.generate(
+        5,
+        (index) => TranslationRecord(
+          id: 'record-$index',
+          sourceText: 'source-$index',
+          translatedText: 'translated-$index',
+          provider: 'openai-compatible',
+          model: 'gpt-4o-mini',
+          paramsJson: '{"temperature":0.2}',
+          status: TranslationStatus.success,
+          errorMessage: null,
+          createdAt: DateTime(2026, 4, 12, 9, index),
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      ModelTranslationApp(
+        platformBridgeGateway: gateway,
+        llmConfigRepository: configRepository,
+        translationHistoryUseCase: historyUseCase,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    gateway.emitActionEvent('open_recent_history', payload: <String, Object?>{'source': 'floating_bubble'});
+    await tester.pumpAndSettle();
+
+    expect(gateway.showOverlayCalls, 1);
+    expect(gateway.lastOverlayTitle, 'Recent History');
+    expect(gateway.lastOverlayMessage, contains('translated-0'));
+    expect(gateway.lastOverlayMessage, contains('translated-1'));
+    expect(gateway.lastOverlayMessage, contains('translated-2'));
     expect(gateway.lastOverlayMessage, contains('translated-3'));
+    expect(gateway.lastOverlayMessage, isNot(contains('translated-4')));
   });
 
   testWidgets('ModelTranslation app shows empty hint for open_recent_history action when no records',

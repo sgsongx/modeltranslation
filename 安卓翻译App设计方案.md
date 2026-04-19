@@ -27,15 +27,16 @@
 ## 2.2 悬浮球与悬浮窗
 - 全局悬浮球常驻（前台服务 + Overlay）
 - 单击动作：`translate_clipboard`
-- 长按动作：`open_recent_history`（快速查看最近 3 条翻译）
+- 长按动作：`open_recent_history`（快速查看最近 N 条翻译，默认 3）
 - 结果悬浮窗支持：查看原文、查看译文、复制、关闭
 - 历史悬浮窗支持：滚动浏览、复制原文、复制译文、关闭
 - 悬浮窗字体大小支持配置（12~28sp）并持久化存储
+- 历史悬浮窗显示条数支持配置（1~50）并持久化存储
 
 ### 2.2.1 悬浮球交互细则（便捷 + 人性化）
 - 单击：立即翻译剪切板（保持原有最快路径）
-- 长按：显示“历史悬浮窗”，可直接浏览完整历史（无需切换到 App 主界面）
-- 历史展示规则：按时间倒序展示全部可用记录，支持滚动浏览
+- 长按：显示“历史悬浮窗”，无需切换到 App 主界面
+- 历史展示规则：按时间倒序展示最近 N 条（默认 3，设置页可调），支持滚动浏览
 - 每条历史提供快捷按钮：`Copy original` 与 `Copy translation`
 - 空历史提示：`No translation history yet. Tap the bubble once to translate first.`
 - 失败兜底：历史加载失败时展示错误摘要，不阻断悬浮球继续使用
@@ -111,7 +112,7 @@
 
 1. OverlayService 捕获长按事件
 2. 通过 EventChannel 发出 `onAction("open_recent_history")`
-3. Flutter Application/Presentation 层加载历史记录（按时间倒序）
+3. Flutter Application/Presentation 层按配置加载最近 N 条历史记录（默认 3）
 4. 组装结构化历史负载（sourceText / translatedText / createdAt / status）
 5. 调 `OverlayGateway.showResult()` 展示“Recent History”悬浮窗（附带字体大小配置）
 6. 在悬浮窗内完成记录复制与回填，无需跳转 History 页
@@ -138,7 +139,7 @@
 ## 7. 数据模型（建议）
 
 - `LlmConfig`
-  - id, provider, baseUrl, apiKeyRef, model, temperature, topP, maxTokens, timeoutMs, systemPrompt, overlayFontSizeSp, updatedAt
+  - id, provider, baseUrl, apiKeyRef, model, temperature, topP, maxTokens, timeoutMs, systemPrompt, overlayFontSizeSp, historyOverlayLimit, updatedAt
 - `TranslationRequest`
   - sourceText, sourceLang?, targetLang, stylePreset, configSnapshot
 - `TranslationRecord`
@@ -203,10 +204,11 @@
 3. 每次翻译都有记录可查询（成功/失败均可追踪）  
 4. 异常路径有清晰反馈，不出现“无响应”  
 5. 新增动作时无需修改翻译核心用例代码
-6. 长按悬浮球可在 1 次操作内查看最近历史，空状态有明确引导
+6. 长按悬浮球可在 1 次操作内查看最近历史（默认最近 3 条），空状态有明确引导
 7. 历史悬浮窗在大量数据下仍可关闭，不出现按钮越界
 8. 可在设置页调整悬浮窗字体并在重启后保持生效
 9. 历史悬浮窗支持一键复制原文/译文，结果悬浮窗同时展示原文与译文
+10. 设置页可配置历史悬浮窗显示条数（1~50），重启后保持生效
 
 ---
 

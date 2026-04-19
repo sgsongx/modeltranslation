@@ -11,6 +11,7 @@ class LlmConfig {
     required this.timeoutMs,
     required this.systemPrompt,
     this.overlayFontSizeSp = 15.0,
+    this.historyOverlayLimit = 3,
     required this.updatedAt,
   });
 
@@ -25,5 +26,6 @@ class LlmConfig {
   final int timeoutMs;
   final String systemPrompt;
   final double overlayFontSizeSp;
+  final int historyOverlayLimit;
   final DateTime updatedAt;
 }

@@ -49,6 +49,7 @@ class SharedPrefsLlmConfigRepository implements LlmConfigRepository {
       'timeoutMs': config.timeoutMs,
       'systemPrompt': config.systemPrompt,
       'overlayFontSizeSp': config.overlayFontSizeSp,
+      'historyOverlayLimit': config.historyOverlayLimit,
       'updatedAt': config.updatedAt.toIso8601String(),
     };
   }
@@ -66,6 +67,7 @@ class SharedPrefsLlmConfigRepository implements LlmConfigRepository {
       timeoutMs: (map['timeoutMs'] as num?)?.toInt() ?? 12000,
       systemPrompt: (map['systemPrompt'] as String?) ?? 'Translate the text accurately and keep formatting.',
       overlayFontSizeSp: (map['overlayFontSizeSp'] as num?)?.toDouble() ?? 15.0,
+      historyOverlayLimit: (map['historyOverlayLimit'] as num?)?.toInt() ?? 3,
       updatedAt: DateTime.tryParse((map['updatedAt'] as String?) ?? '') ?? DateTime.now(),
     );
   }
